@@ -25,10 +25,6 @@ pub fn init(args: &[String], envs: &[String]) {
     tracepoint_init().expect("Failed to initialize tracepoints");
 
     //可以注释掉，暂时不使用
-    crate::ebpf::init_ebpf();
-    //可以注释掉，暂时不使用
-    crate::perf::perf_event_init();
-    //可以注释掉，暂时不使用
     crate::kmod::init_kmod();
 
     pseudofs::mount_all().expect("Failed to mount pseudofs");

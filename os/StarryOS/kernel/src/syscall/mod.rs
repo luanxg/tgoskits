@@ -936,14 +936,14 @@ pub fn handle_syscall(uctx: &mut UserContext) {
         // dummy fds
         Sysno::userfaultfd | Sysno::memfd_secret => sys_dummy_fd(sysno),
 
-        Sysno::bpf => crate::ebpf::sys_bpf(uctx.arg0() as _, uctx.arg1(), uctx.arg2() as _),
-        Sysno::perf_event_open => crate::perf::sys_perf_event_open(
-            uctx.arg0(),
-            uctx.arg1() as _,
-            uctx.arg2() as _,
-            uctx.arg3() as _,
-            uctx.arg4() as _,
-        ),
+        Sysno::bpf => {
+            warn!("bpf is not supported");
+            Err(AxError::from(LinuxError::ENOSYS))
+        }
+        Sysno::perf_event_open => {
+            warn!("perf_event_open is not supported");
+            Err(AxError::from(LinuxError::ENOSYS))
+        }
         Sysno::init_module => {
             kmod::sys_init_module(uctx.arg0() as _, uctx.arg1() as _, uctx.arg2() as _)
         }
