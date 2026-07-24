@@ -31,8 +31,6 @@ bitflags! {
         const SIGHAND = CLONE_SIGHAND as u64;
         /// Sets pidfd to the child process's PID file descriptor.
         const PIDFD = CLONE_PIDFD as u64;
-        /// If the calling process is being traced, then trace the child also.
-        const PTRACE = CLONE_PTRACE as u64;
         /// The execution of the calling process is suspended until the child releases
         /// its virtual memory resources via a call to execve(2) or _exit(2) (as with vfork(2)).
         const VFORK = CLONE_VFORK as u64;
@@ -53,8 +51,6 @@ bitflags! {
         /// Clear (zero) the child thread ID in child memory when the child exits,
         /// and do a wakeup on the futex at that address.
         const CHILD_CLEARTID = CLONE_CHILD_CLEARTID as u64;
-        /// A tracing process cannot force `CLONE_PTRACE` on this child process.
-        const UNTRACED = CLONE_UNTRACED as u64;
         /// Store the child thread ID in the child's memory.
         const CHILD_SETTID = CLONE_CHILD_SETTID as u64;
         /// Create the process in a new cgroup namespace.
@@ -385,40 +381,8 @@ impl CloneArgs {
             new_proc_data.set_vfork_done(poll);
         }
 
-        let parent_pid = curr.as_thread().proc_data.proc.pid();
-        // The user-visible tid, not the scheduler id: they diverge for the init
-        // process (pid/tid pinned to 1, scheduler id higher). Signal delivery
-        // and ptrace below look this up in the tid-keyed task table.
-        let parent_tid = curr.as_thread().tid() as Pid;
-        let ptrace_event = if flags.contains(CloneFlags::THREAD) {
-            super::ptrace::PTRACE_EVENT_CLONE
-        } else if flags.contains(CloneFlags::VFORK) {
-            super::ptrace::PTRACE_EVENT_VFORK
-        } else {
-            super::ptrace::PTRACE_EVENT_FORK
-        };
-        let trace_clone =
-            super::ptrace::ptrace_notify_clone(parent_pid, parent_tid, tid as Pid, ptrace_event);
-        if trace_clone && let Some(tracer_pid) = curr.as_thread().proc_data.ptrace_tracer_pid() {
-            if !flags.contains(CloneFlags::THREAD) {
-                new_proc_data.set_ptrace_tracer_pid(tracer_pid);
-                new_proc_data.set_ptrace_attached();
-            }
-            new_proc_data.set_ptrace_stop(tid, starry_signal::Signo::SIGSTOP, &new_uctx);
-        }
-
         let task = spawn_task(new_task);
         add_task_to_table(&task);
-
-        if trace_clone && needs_vfork_block {
-            let _ = crate::task::send_signal_to_thread(
-                None,
-                parent_tid,
-                Some(starry_signal::SignalInfo::new_kernel(
-                    starry_signal::Signo::SIGTRAP,
-                )),
-            );
-        }
 
         // Fire before any potential vfork-wait so observers see the fork edge
         // even when the parent blocks below.
@@ -427,7 +391,6 @@ impl CloneArgs {
         // Block the parent until the child exec's or exits.
         if needs_vfork_block {
             new_proc_data.wait_vfork_done();
-            let _ = super::ptrace::ptrace_notify_vfork_done(parent_pid, parent_tid, tid as Pid);
         }
 
         Ok(tid as _)

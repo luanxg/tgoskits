@@ -407,14 +407,6 @@ fn do_execve(
         has_ldso,
     );
 
-    // All ptrace tracees (both TRACEME and ATTACH) unconditionally
-    // stop with SIGTRAP on execve (Linux ptrace(2)). PTRACE_O_TRACEEXEC
-    // only controls whether the stop carries PTRACE_EVENT_EXEC data,
-    // not whether the stop itself occurs.
-    if proc_data.is_ptrace_traceme() || proc_data.is_ptrace_attached() {
-        proc_data.set_ptrace_exec_stop_pending();
-    }
-
     // Unblock a vfork parent waiting for this child to exec.
     // Must be last: by now CLOEXEC fds are closed so the parent's pipe
     // read will see EOF correctly.

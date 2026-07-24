@@ -3,12 +3,11 @@ use ax_task::TaskInner;
 use starry_process::Pid;
 use starry_signal::{SEGV_ACCERR, SEGV_MAPERR, SignalInfo, Signo};
 use starry_vm::{VmMutPtr, VmPtr};
-use syscalls::Sysno;
 
 use super::{
-    AsThread, SyscallRestartInfo, SyscallTraceState, TimerState, check_signals, poll_process_timer,
-    ptrace_stop_current, ptrace_syscall_stop_current, raise_signal_fatal, set_timer_state,
-    unblock_next_signal, wait_existing_ptrace_stop_current,
+    AsThread, SyscallRestartInfo, TimerState, check_signals, poll_process_timer,
+    raise_signal_fatal, set_timer_state,
+    unblock_next_signal,
 };
 use crate::syscall::{handle_syscall, syscall_allows_signal_restart};
 
@@ -25,20 +24,7 @@ pub fn new_user_task(name: &str, mut uctx: UserContext, set_child_tid: usize) ->
             info!("Enter user space: ip={:#x}, sp={:#x}", uctx.ip(), uctx.sp());
 
             let thr = curr.as_thread();
-            if thr.proc_data.ptrace_stop_signo_for(thr.tid()).is_some() {
-                wait_existing_ptrace_stop_current(thr, &mut uctx);
-            } else if thr.tid() == thr.proc_data.proc.pid()
-                && thr.proc_data.ptrace_stop_signo().is_some()
-            {
-                let _ = ptrace_stop_current(thr, Signo::SIGSTOP, &mut uctx);
-            }
             while !thr.pending_exit() {
-                if thr.proc_data.is_ptrace_singlestep_for(thr.tid())
-                    && (thr.proc_data.is_ptrace_traceme() || thr.proc_data.is_ptrace_attached())
-                {
-                    crate::syscall::ptrace_setup_singlestep(&thr.proc_data, thr.tid(), &mut uctx);
-                }
-
                 let reason = uctx.run();
 
                 set_timer_state(&curr, TimerState::Kernel);
@@ -49,53 +35,7 @@ pub fn new_user_task(name: &str, mut uctx: UserContext, set_child_tid: usize) ->
 
                 match reason {
                     ReturnReason::Syscall => {
-                        let tid = thr.tid();
-                        let trace_state = thr.proc_data.take_ptrace_syscall_trace_for(tid);
-                        if matches!(trace_state, SyscallTraceState::Entry)
-                            && ptrace_syscall_stop_current(thr, Signo::SIGTRAP, &mut uctx).is_some()
-                        {
-                            match thr.proc_data.take_ptrace_syscall_trace_for(tid) {
-                                SyscallTraceState::Entry | SyscallTraceState::Exit => {
-                                    thr.proc_data.set_ptrace_syscall_trace_state_for(
-                                        tid,
-                                        SyscallTraceState::Exit,
-                                    )
-                                }
-                                SyscallTraceState::None => {}
-                            }
-                        }
-
-                        if let Some(exit_code) = ptrace_exit_event_code(saved_sysno, saved_a0)
-                            && crate::syscall::ptrace_notify_exit(
-                                thr.proc_data.proc.pid(),
-                                exit_code,
-                            )
-                        {
-                            let _ = ptrace_stop_current(thr, Signo::SIGTRAP, &mut uctx);
-                        }
-
                         handle_syscall(&mut uctx);
-                        if thr.proc_data.has_ptrace_pending_event_for(tid)
-                            && let Some(_resume_sig) =
-                                ptrace_stop_current(thr, Signo::SIGTRAP, &mut uctx)
-                        {
-                            continue;
-                        }
-                        if matches!(
-                            thr.proc_data.take_ptrace_syscall_trace_for(tid),
-                            SyscallTraceState::Exit
-                        ) {
-                            let _ = ptrace_syscall_stop_current(thr, Signo::SIGTRAP, &mut uctx);
-                        }
-                        if thr.proc_data.take_ptrace_exec_stop_pending() {
-                            let _is_event =
-                                crate::syscall::ptrace_notify_exec(thr.proc_data.proc.pid());
-                            if let Some(_resume_sig) =
-                                ptrace_stop_current(thr, Signo::SIGTRAP, &mut uctx)
-                            {
-                                continue;
-                            }
-                        }
                     }
                     ReturnReason::PageFault(addr, flags) => {
                         // Classify si_code while holding the aspace lock: an
@@ -158,68 +98,6 @@ pub fn new_user_task(name: &str, mut uctx: UserContext, set_child_tid: usize) ->
                                 break 'exc;
                             }
                             _ => {}
-                        }
-                        if matches!(kind, ExceptionKind::Breakpoint)
-                            && (thr.proc_data.is_ptrace_traceme()
-                                || thr.proc_data.is_ptrace_attached())
-                        {
-                            let saved_insn = thr.proc_data.take_ptrace_ss_saved_insn_for(thr.tid());
-                            if let Some((addr, insn)) = saved_insn {
-                                if addr == uctx.ip() {
-                                    #[cfg(any(
-                                        target_arch = "riscv64",
-                                        target_arch = "aarch64",
-                                        target_arch = "loongarch64"
-                                    ))]
-                                    let _ = crate::syscall::ptrace_restore_singlestep_insn(
-                                        &thr.proc_data,
-                                        thr.tid(),
-                                        addr,
-                                        insn,
-                                    );
-                                    #[cfg(not(any(
-                                        target_arch = "riscv64",
-                                        target_arch = "aarch64",
-                                        target_arch = "loongarch64"
-                                    )))]
-                                    thr.proc_data.set_ptrace_ss_saved_insn_for(
-                                        thr.tid(),
-                                        Some((addr, insn)),
-                                    );
-                                } else {
-                                    thr.proc_data.set_ptrace_ss_saved_insn_for(
-                                        thr.tid(),
-                                        Some((addr, insn)),
-                                    );
-                                }
-                            }
-                            if let Some(_resume_sig) =
-                                ptrace_stop_current(thr, Signo::SIGTRAP, &mut uctx)
-                            {
-                                break 'exc;
-                            }
-                        }
-                        // On x86_64, PTRACE_SINGLESTEP sets TF in RFLAGS;
-                        // the resulting #DB exception arrives here.
-                        // ExceptionKind::Debug and uctx.rflags only exist on
-                        // x86_64, so this whole block is arch-gated.
-                        #[cfg(target_arch = "x86_64")]
-                        if matches!(kind, ExceptionKind::Debug)
-                            && (thr.proc_data.is_ptrace_traceme()
-                                || thr.proc_data.is_ptrace_attached())
-                        {
-                            // Clear TF (bit 8) in the saved RFLAGS.  The Intel
-                            // SDM (Vol 3A §17.3.2) states the CPU clears TF
-                            // when delivering a TF-induced #DB, but QEMU may
-                            // not always honour this.  Clearing explicitly
-                            // prevents an unwanted extra single-step on resume.
-                            uctx.rflags &= !(1u64 << 8);
-                            thr.proc_data.set_ptrace_singlestep_for(thr.tid(), false);
-                            if let Some(_resume_sig) =
-                                ptrace_stop_current(thr, Signo::SIGTRAP, &mut uctx)
-                            {
-                                break 'exc;
-                            }
                         }
                         warn!(
                             "user exception: ip={:#x}, fault_addr={:#x}, kind={:?}, esr={:#x}, \
@@ -298,13 +176,6 @@ pub fn new_user_task(name: &str, mut uctx: UserContext, set_child_tid: usize) ->
         name.into(),
         crate::config::KERNEL_STACK_SIZE,
     )
-}
-
-fn ptrace_exit_event_code(sysno: usize, arg0: usize) -> Option<i32> {
-    match Sysno::new(sysno) {
-        Some(Sysno::exit | Sysno::exit_group) => Some((arg0 as i32) << 8),
-        _ => None,
-    }
 }
 
 #[cfg(target_arch = "aarch64")]

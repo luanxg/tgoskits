@@ -190,12 +190,6 @@ impl Cred {
         self.has_cap(CAP_SYS_BOOT)
     }
 
-    /// Check whether this credential may inspect another process
-    /// (equivalent to `CAP_SYS_PTRACE` — approximated as euid == 0).
-    pub fn has_cap_sys_ptrace(&self) -> bool {
-        self.euid == 0
-    }
-
     /// Check whether this credential has the privilege to change file
     /// ownership (equivalent to `CAP_CHOWN`).
     pub fn has_cap_chown(&self) -> bool {

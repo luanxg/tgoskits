@@ -57,7 +57,6 @@ static PROCESS_TABLE: RwLock<WeakMap<Pid, Weak<ProcessData>>> = RwLock::new(Weak
 struct ZombieEntry {
     proc: Arc<Process>,
     cred: Arc<Cred>,
-    ptrace_tracer_pid: Option<Pid>,
     is_clone_child: bool,
     wait_parent_tid: Pid,
 }
@@ -167,7 +166,6 @@ pub fn register_zombie(
     pid: Pid,
     proc: Arc<Process>,
     cred: Arc<Cred>,
-    ptrace_tracer_pid: Option<Pid>,
     is_clone_child: bool,
     wait_parent_tid: Pid,
 ) {
@@ -176,7 +174,6 @@ pub fn register_zombie(
         ZombieEntry {
             proc,
             cred,
-            ptrace_tracer_pid,
             is_clone_child,
             wait_parent_tid,
         },
@@ -218,36 +215,6 @@ pub fn is_zombie_clone_child(pid: Pid) -> Option<bool> {
 
 pub fn zombie_wait_parent_tid(pid: Pid) -> Option<Pid> {
     ZOMBIE_TABLE.read().get(&pid).map(|e| e.wait_parent_tid)
-}
-
-pub fn traced_zombies_for(tracer_pid: Pid) -> Vec<Arc<Process>> {
-    ZOMBIE_TABLE
-        .read()
-        .values()
-        .filter(|entry| entry.ptrace_tracer_pid == Some(tracer_pid))
-        .map(|entry| entry.proc.clone())
-        .collect()
-}
-
-/// Detach every live tracee that still points at `tracer_pid`.
-///
-/// A ptrace relationship must not outlive the tracer. Otherwise a tracee can
-/// remain stuck in ptrace-stop with a dead tracer PID, or resume later with
-/// stale ptrace state still armed. Either outcome is unsafe during task-exit
-/// cleanup paths. Clearing the stop state wakes any tracee blocked in
-/// `ptrace_stop_current()` so it can continue without consulting the dead
-/// tracer again.
-pub fn detach_live_tracees_of(tracer_pid: Pid) {
-    for tracee in processes() {
-        if tracee.ptrace_tracer_pid() != Some(tracer_pid) {
-            continue;
-        }
-        tracee.clear_ptrace_stop();
-        tracee.clear_ptrace_traceme();
-        tracee.clear_ptrace_attached();
-        tracee.clear_ptrace_tracer_pid();
-        tracee.set_ptrace_options(0);
-    }
 }
 
 /// Finds the process with the given PID.
@@ -569,11 +536,6 @@ pub fn do_exit(exit_code: i32, group_exit: bool) {
         // process address-space slot.
         crate::syscall::cleanup_aio_contexts_for_pid(process.pid());
 
-        // Drop ptrace relationships owned by this process before publishing the
-        // final zombie state. Tracees blocked in ptrace-stop must not retain a
-        // dead tracer PID or stale stop context once the tracer is gone.
-        detach_live_tracees_of(process.pid());
-
         // Close all file descriptors before marking the process as exited.
         // This ensures pipe write ends and other resources are properly released,
         // so parent processes blocking on pipe reads will receive EOF.
@@ -603,14 +565,12 @@ pub fn do_exit(exit_code: i32, group_exit: bool) {
         // check_kill_permission can still authorise signals to this zombie
         // after the task has been GC'd (mirrors Linux task_struct lifetime).
         let zombie_cred = thr.cred();
-        let ptrace_tracer_pid = thr.proc_data.ptrace_tracer_pid();
         let is_clone_child = thr.proc_data.is_clone_child();
         let wait_parent_tid = thr.proc_data.wait_parent_tid;
         register_zombie(
             process.pid(),
             process.clone(),
             zombie_cred,
-            ptrace_tracer_pid,
             is_clone_child,
             wait_parent_tid,
         );
@@ -633,15 +593,6 @@ pub fn do_exit(exit_code: i32, group_exit: bool) {
                 // Child exit state is published before waking waiters.
                 unsafe { data.child_exit_event.wake(axpoll::IoEvents::IN) };
             }
-        }
-        if let Some(tracer_pid) = ptrace_tracer_pid
-            && process
-                .parent()
-                .is_none_or(|parent| parent.pid() != tracer_pid)
-            && let Ok(data) = get_process_data(tracer_pid)
-        {
-            // Child exit state is published before waking waiters.
-            unsafe { data.child_exit_event.wake(axpoll::IoEvents::IN) };
         }
         // Send pdeathsig to child processes
         for child in children_snapshot {

@@ -382,7 +382,7 @@ fn task_status(task: &AxTaskRef) -> String {
     let name = task.name();
     let num_threads = thread.proc_data.proc.threads().len() as u32;
     let mem = ProcessMemStats::collect(&thread.proc_data.aspace().lock());
-    let tracer_pid = thread.proc_data.ptrace_tracer_pid().unwrap_or(0);
+    let tracer_pid = 0;
     let ppid = thread
         .proc_data
         .proc
@@ -815,16 +815,6 @@ impl ProcMemFile {
         let current_task = current();
         let current_proc = &current_task.as_thread().proc_data;
         if current_proc.proc.pid() == self.proc_data.proc.pid() {
-            return Ok(());
-        }
-
-        let is_tracer = (self.proc_data.is_ptrace_traceme() || self.proc_data.is_ptrace_attached())
-            && self
-                .proc_data
-                .ptrace_tracer_pid()
-                .is_some_and(|pid| pid == current_proc.proc.pid())
-            && self.proc_data.ptrace_stop_signo().is_some();
-        if is_tracer {
             Ok(())
         } else {
             Err(VfsError::PermissionDenied)
@@ -942,7 +932,7 @@ impl SimpleDirOps for ThreadDir {
                                 tgid: pid,
                                 pid: pid as u64,
                                 ppid,
-                                tracer_pid: thread.proc_data.ptrace_tracer_pid().unwrap_or(0),
+                                tracer_pid: 0,
                                 cred: &cred,
                                 num_threads,
                             },

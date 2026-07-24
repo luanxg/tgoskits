@@ -6,9 +6,9 @@ use ax_errno::{AxError, AxResult};
 use ax_runtime::hal::cpu::uspace::UserContext;
 use ax_task::{
     TaskInner, current,
-    future::{block_on, interruptible},
+    future::block_on,
 };
-use linux_raw_sys::general::{CLD_CONTINUED, CLD_STOPPED, CLD_TRAPPED};
+use linux_raw_sys::general::{CLD_CONTINUED, CLD_STOPPED};
 use starry_process::Pid;
 use starry_signal::{SignalInfo, SignalOSAction, SignalSet, Signo};
 #[cfg(target_arch = "riscv64")]
@@ -173,126 +173,6 @@ fn dump_user_crash_context(uctx: &UserContext) {
     dump_user_backtrace(uctx);
 }
 
-/// Block the current thread in a ptrace stop.
-///
-/// Returns `Some(resume_signo)` if the thread was traced and is now being
-/// resumed by the tracer. `None` means the thread was not traced (no
-/// `PTRACE_TRACEME`). The optional `resume_signo` is the signal the tracer
-/// chose to inject on resume (via `PTRACE_CONT(sig)`); `None` within the
-/// outer `Some` means suppress the original signal.
-pub fn ptrace_stop_current(
-    thr: &Thread,
-    signo: Signo,
-    uctx: &mut UserContext,
-) -> Option<Option<Signo>> {
-    ptrace_stop_current_impl(thr, signo, uctx, false)
-}
-
-pub fn ptrace_syscall_stop_current(
-    thr: &Thread,
-    signo: Signo,
-    uctx: &mut UserContext,
-) -> Option<Option<Signo>> {
-    ptrace_stop_current_impl(thr, signo, uctx, true)
-}
-
-pub fn wait_existing_ptrace_stop_current(thr: &Thread, uctx: &mut UserContext) {
-    let tid = thr.tid();
-    if let Some(signo) = thr.proc_data.ptrace_stop_signo_for(tid) {
-        notify_ptrace_waiter(thr, signo);
-    }
-    wait_ptrace_resume(thr, tid, uctx);
-}
-
-fn wait_ptrace_resume(thr: &Thread, tid: u32, uctx: &mut UserContext) {
-    current().clear_interrupt();
-    let wait_result = block_on(interruptible(poll_fn(|cx| {
-        if thr.proc_data.ptrace_stop_signo_for(tid).is_none() {
-            Poll::Ready(())
-        } else {
-            thr.proc_data.register_ptrace_stop_waker(cx.waker());
-            if thr.proc_data.ptrace_stop_signo_for(tid).is_none() {
-                Poll::Ready(())
-            } else {
-                Poll::Pending
-            }
-        }
-    })));
-
-    if wait_result.is_err() {
-        thr.proc_data.clear_ptrace_stop();
-    } else if let Some(resume_uctx) = thr.proc_data.take_ptrace_stop_user_context_for(tid) {
-        *uctx = resume_uctx;
-        thr.proc_data.restore_current_fp_for_ptrace(tid, uctx);
-    }
-}
-
-fn ptrace_stop_current_impl(
-    thr: &Thread,
-    signo: Signo,
-    uctx: &mut UserContext,
-    is_syscall_stop: bool,
-) -> Option<Option<Signo>> {
-    if !thr.proc_data.is_ptrace_traceme() && !thr.proc_data.is_ptrace_attached() {
-        return None;
-    }
-
-    let tid = thr.tid();
-    while !thr.proc_data.claim_ptrace_stop(tid) {
-        block_on(poll_fn(|cx| {
-            if !thr.proc_data.has_ptrace_stop(tid) {
-                Poll::Ready(())
-            } else {
-                thr.proc_data.register_ptrace_stop_waker(cx.waker());
-                if !thr.proc_data.has_ptrace_stop(tid) {
-                    Poll::Ready(())
-                } else {
-                    Poll::Pending
-                }
-            }
-        }));
-    }
-
-    #[cfg(any(
-        target_arch = "riscv64",
-        target_arch = "aarch64",
-        target_arch = "loongarch64",
-        target_arch = "x86_64"
-    ))]
-    {
-        thr.proc_data.save_current_fp_for_ptrace(tid);
-    }
-    if is_syscall_stop {
-        thr.proc_data.set_ptrace_syscall_stop(tid, signo, uctx);
-    } else {
-        thr.proc_data.set_ptrace_stop(tid, signo, uctx);
-    }
-    notify_ptrace_waiter(thr, signo);
-
-    wait_ptrace_resume(thr, tid, uctx);
-    Some(thr.proc_data.take_ptrace_resume_signo_for(tid))
-}
-
-fn notify_ptrace_waiter(thr: &Thread, signo: Signo) {
-    let waiter_pid = thr
-        .proc_data
-        .ptrace_tracer_pid()
-        .or_else(|| thr.proc_data.proc.parent().map(|parent| parent.pid()));
-    if let Some(waiter_pid) = waiter_pid
-        && let Ok(parent_data) = get_process_data(waiter_pid)
-    {
-        let sigchld = SignalInfo::new_sigchld(
-            thr.proc_data.proc.pid(),
-            thr.cred().uid,
-            CLD_TRAPPED as i32,
-            signo as i32,
-        );
-        let _ = send_signal_to_process(waiter_pid, Some(sigchld));
-        // Ptrace stop report is published before waking waiters.
-        unsafe { parent_data.child_exit_event.wake(axpoll::IoEvents::IN) };
-    }
-}
-
 pub fn check_signals(
     thr: &Thread,
     uctx: &mut UserContext,
@@ -343,24 +223,6 @@ pub fn check_signals(
     };
 
     let signo = sig.signo();
-
-    if signo != Signo::SIGKILL
-        && !thr
-            .proc_data
-            .take_ptrace_resume_signal_bypass_for(thr.tid(), signo)
-        && let Some(resume_signo) = ptrace_stop_current(thr, signo, uctx)
-    {
-        match resume_signo {
-            None => return true,
-            Some(new_signo) if new_signo != signo => {
-                thr.proc_data
-                    .set_ptrace_resume_signal_bypass_for(thr.tid(), new_signo);
-                let _ = thr.signal.send_signal(SignalInfo::new_kernel(new_signo));
-                return true;
-            }
-            Some(_) => {}
-        }
-    }
 
     // Only dump register state when the terminating signal is the same
     // synchronous fault signo that raise_signal_fatal force-delivered to
@@ -559,9 +421,6 @@ pub fn send_signal_to_process(pid: Pid, sig: Option<SignalInfo>) -> AxResult<()>
     if let Some(sig) = sig {
         let signo = sig.signo();
         info!("Send signal {signo:?} to process {pid}");
-        if signo == Signo::SIGKILL && proc_data.ptrace_stop_signo().is_some() {
-            proc_data.clear_ptrace_stop();
-        }
         if let Some(tid) = proc_data.signal.send_signal(sig) {
             // A thread was found that doesn't have the signal blocked.
             // Mark it interrupted so blocking syscalls wrapped by

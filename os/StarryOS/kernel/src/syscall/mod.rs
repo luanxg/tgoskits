@@ -692,7 +692,10 @@ pub fn handle_syscall(uctx: &mut UserContext) {
             uctx.arg2() as _,
             uctx.arg3() as _,
         ),
-        Sysno::ptrace => sys_ptrace(uctx.arg0() as _, uctx.arg1(), uctx.arg2(), uctx.arg3()),
+        Sysno::ptrace => {
+            warn!("ptrace is not supported");
+            Err(AxError::from(ax_errno::LinuxError::ENOSYS))
+        }
         Sysno::getsid => sys_getsid(uctx.arg0() as _),
         Sysno::setsid => sys_setsid(),
         Sysno::getpgid => sys_getpgid(uctx.arg0() as _),
