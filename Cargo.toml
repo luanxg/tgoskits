@@ -179,7 +179,7 @@ axklib = { version = "0.6.5", path = "components/axklib" }
 axplat-dyn = { version = "0.7.5", path = "platforms/axplat-dyn", default-features = false }
 
 axpoll = { version = "0.4.1", path = "components/axpoll" }
-axvisor = { version = "0.5.14", path = "os/axvisor" }
+
 bitmap-allocator = { version = "0.4.6", path = "memory/bitmap-allocator" }
 bwbench-client = { version = "0.3.1", path = "os/arceos/tools/bwbench_client" }
 define-simple-traits = { version = "0.3.4", path = "components/crate_interface/test_crates/define-simple-traits" }
