@@ -16,7 +16,6 @@ license.workspace = true
 [features]
 default = ["dynamic_debug"]
 dev-log = []
-kprobe_test = []
 ext4 = ["ax-fs-ng/ext4"]
 input = ["dep:ax-input", "ax-feat/input"]
 ipi = ["ax-feat/ipi"]
@@ -143,7 +142,6 @@ zerocopy = { version = "0.8", features = ["derive"] }
 ax-ipi = { workspace = true }
 static-keys = "0.8"
 ddebug = "0.5"
-kprobe = { workspace = true }
 lwprintf-rs = "0.3"
 some-serial = { workspace = true, optional = true }
 sg200x-bsp = { workspace = true, optional = true }

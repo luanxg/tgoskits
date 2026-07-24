@@ -74,22 +74,6 @@ pub fn new_user_task(name: &str, mut uctx: UserContext, set_child_tid: usize) ->
                     #[allow(unused_labels)]
                     ReturnReason::Exception(exc_info) => 'exc: {
                         let kind = exc_info.kind();
-                        // A uprobe plants an `int3` in user text (delivered as a
-                        // #BP / Breakpoint exception) and completes its
-                        // out-of-line single-step via a #DB / Debug exception.
-                        // Route both to this process' uprobe manager before any
-                        // ptrace / signal handling: if a uprobe owns the
-                        // faulting address it fixes up `uctx` (sets the
-                        // out-of-line PC + single-step, or restores PC after the
-                        // step) and we resume directly. If not, fall through.
-                        match kind {
-                            ExceptionKind::Breakpoint
-                                if crate::uprobe::break_uprobe_handler(&mut uctx).is_some() =>
-                            {
-                                break 'exc;
-                            }
-                            _ => {}
-                        }
                         warn!(
                             "user exception: ip={:#x}, fault_addr={:#x}, kind={:?}, esr={:#x}, \
                              ec={:#x}, iss={:#x}, info={:?}",

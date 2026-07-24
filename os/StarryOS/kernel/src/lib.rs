@@ -20,7 +20,6 @@ pub mod entry;
 
 mod config;
 mod file;
-pub mod kprobe;
 mod mm;
 mod pseudofs;
 mod stop_machine;
@@ -28,4 +27,3 @@ mod syscall;
 mod task;
 mod time;
 mod trap;
-mod uprobe;

@@ -25,6 +25,8 @@ pub(crate) struct ThreadGroup {
 pub struct Process {
     pid: Pid,
     is_zombie: AtomicBool,
+
+    //设为子收割者
     is_child_subreaper: AtomicBool,
     pub(crate) tg: SpinNoIrq<ThreadGroup>,
 
@@ -331,10 +333,10 @@ impl Process {
         process
     }
 
-    /// Creates a init [`Process`].
+    /// 创建一个 init [`Process`]。
     ///
-    /// This function can be called multiple times, but
-    /// [`ProcessBuilder::build`] on the the result must be called only once.
+    /// 此函数可多次调用，但对其返回结果调用
+    /// [`ProcessBuilder::build`] 只能执行一次。
     pub fn new_init(pid: Pid) -> Arc<Process> {
         Self::new(pid, None)
     }

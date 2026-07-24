@@ -167,8 +167,6 @@ pub struct Thread {
     /// the real fault terminated silently.
     pub fault_dump_signo: AtomicU8,
 
-    pub kretprobe_stack: SpinNoIrq<alloc::vec::Vec<kprobe::retprobe::RetprobeInstance>>,
-
     /// Whether uid_map has been written for this thread's user namespace.
     uid_map_written: AtomicBool,
 
@@ -216,8 +214,6 @@ impl Thread {
             cred: SpinNoIrq::new(cred),
 
             fault_dump_signo: AtomicU8::new(0),
-            kretprobe_stack: SpinNoIrq::new(alloc::vec::Vec::new()),
-
             uid_map_written: AtomicBool::new(false),
             gid_map_written: AtomicBool::new(false),
             setgroups_deny: AtomicBool::new(false),
@@ -587,11 +583,6 @@ pub struct ProcessData {
     /// The virtual memory address space.
     // TODO: scopify
     aspace: SpinNoIrq<Arc<Mutex<AddrSpace>>>,
-    /// The per-process uprobe manager. Each process has its own because user
-    /// code can be modified independently.
-    pub uprobe_manager: crate::kprobe::KprobeManager,
-    /// Per-process uprobe point list, paired with [`Self::uprobe_manager`].
-    pub uprobe_point_list: Mutex<crate::kprobe::KprobePointList>,
     /// The resource scope
     pub scope: RwLock<Scope>,
     /// The user heap top
@@ -702,8 +693,6 @@ impl ProcessData {
             cmdline: RwLock::new(image.cmdline),
             auxv: RwLock::new(image.auxv),
             aspace: SpinNoIrq::new(aspace),
-            uprobe_manager: crate::kprobe::KprobeManager::new(),
-            uprobe_point_list: Mutex::new(crate::kprobe::KprobePointList::new()),
             scope: RwLock::new(Scope::new()),
             heap_top: AtomicUsize::new(crate::config::USER_HEAP_BASE),
 
