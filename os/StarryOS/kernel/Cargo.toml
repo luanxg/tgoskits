@@ -34,7 +34,6 @@ vsock = ["ax-feat/vsock"]
 dynamic_debug = ["ipi"]
 sg2002 = [
     "dep:ax-dma",
-    "dep:sg2002-tpu",
     "dep:some-serial",
     "dep:sg200x-bsp",
     "dep:tock-registers",
@@ -85,7 +84,6 @@ ax-runtime.workspace = true
 ax-sync.workspace = true
 ax-task.workspace = true
 ax-dma = { workspace = true, optional = true }
-sg2002-tpu = { workspace = true, optional = true }
 k230-kpu = { workspace = true, optional = true }
 crab-usb.workspace = true
 rdrive.workspace = true
