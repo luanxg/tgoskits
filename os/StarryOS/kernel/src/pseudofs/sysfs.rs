@@ -308,12 +308,11 @@ struct BusDir {
 
 impl SimpleDirOps for BusDir {
     fn child_names<'a>(&'a self) -> Box<dyn Iterator<Item = Cow<'a, str>> + 'a> {
-        let names: &'static [&'static str] = if crate::pseudofs::usbfs::has_manager() {
-            &["platform", "usb", "event_source"]
-        } else {
-            &["platform", "event_source"]
-        };
-        Box::new(names.iter().copied().map(Cow::Borrowed))
+        Box::new(
+            ["platform", "event_source"]
+                .into_iter()
+                .map(Cow::Borrowed),
+        )
     }
 
     fn lookup_child(&self, name: &str) -> VfsResult<NodeOpsMux> {
@@ -322,9 +321,6 @@ impl SimpleDirOps for BusDir {
             "platform" => SimpleDir::new_maker(fs.clone(), Arc::new(PlatformBusClassDir)),
             "event_source" => {
                 SimpleDir::new_maker(fs.clone(), Arc::new(EventSourceBusDir { fs: fs.clone() }))
-            }
-            "usb" if crate::pseudofs::usbfs::has_manager() => {
-                SimpleDir::new_maker(fs.clone(), Arc::new(DirMapping::new()))
             }
             _ => return Err(VfsError::NotFound),
         }))

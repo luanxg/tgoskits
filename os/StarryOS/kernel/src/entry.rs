@@ -22,8 +22,6 @@ pub fn init(args: &[String], envs: &[String]) {
     // static_keys::global_init();
     pseudofs::mount_all().expect("Failed to mount pseudofs");
     spawn_alarm_task();
-    //可以注释掉，暂时不使用
-    pseudofs::usbfs::start_event_pump();
 
     //当物理内存分配失败时，分配器优先淘汰page cache中的干净页面
     //暂时也可以不需要

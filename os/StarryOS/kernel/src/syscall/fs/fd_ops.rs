@@ -124,13 +124,6 @@ fn add_to_fd(result: OpenResult, flags: u32) -> AxResult<i32> {
                     device.inner().open(true)?;
                 }
                 let inner = device.inner().as_any();
-                if crate::pseudofs::usbfs::is_usbfs_device(inner) {
-                    let wrapped = crate::pseudofs::usbfs::open_usbfs_file(inner, file, flags)?;
-                    if flags & O_NONBLOCK != 0 {
-                        wrapped.set_nonblocking(true)?;
-                    }
-                    return add_file_like(wrapped, flags & O_CLOEXEC != 0);
-                }
                 if let Some(ptmx) = inner.downcast_ref::<tty::Ptmx>() {
                     // Opening /dev/ptmx creates a new pseudo-terminal
                     let (master, pty_number) = ptmx.create_pty()?;
