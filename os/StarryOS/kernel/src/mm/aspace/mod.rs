@@ -41,16 +41,14 @@ pub struct AddrSpace {
     va_range: VirtAddrRange,
     areas: MemorySet<Backend>,
     pt: PageTable,
-    /// Number of live [`crate::task::ProcessData`] instances that reference this
-    /// address space (each `fork`/`clone` / `execve` slot that holds the
-    /// `Arc<Mutex<AddrSpace>>`).
+    /// 引用了此地址空间的活跃 [`crate::task::ProcessData`] 实例的数量
+    /// （即每个 `fork`/`clone`/`execve` 路径中持有 `Arc<Mutex<AddrSpace>>` 的位置）。
     ///
-    /// This must **not** be confused with `Arc::strong_count`, which also counts
-    /// transient clones from `ProcessData::aspace()` and is not reliable for
-    /// SMP teardown decisions.
+    /// 切勿将其与 `Arc::strong_count` 混淆——后者还会计入
+    /// `ProcessData::aspace()` 产生的临时 clone，对于 SMP 销毁决策而言不可靠。
     pub(crate) process_slots: AtomicUsize,
-    /// All VmX counters for this address space.  Maintained automatically by
-    /// `map`, `unmap`, `clear`, and `try_clone`; never touch from outside mm/.
+    /// 此地址空间的所有 VmX 计数器。由 `map`、`unmap`、`clear`
+    /// 和 `try_clone` 自动维护，切勿在 mm/ 模块外部直接修改。
     pub vm_stat: ProcessVmStat,
 }
 

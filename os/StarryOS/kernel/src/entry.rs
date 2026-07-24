@@ -19,17 +19,25 @@ use crate::{
 
 /// Initialize and run initproc.
 pub fn init(args: &[String], envs: &[String]) {
+    //可以注释掉，暂时不使用
     static_keys::global_init();
+    //可以注释掉，暂时不使用
     tracepoint_init().expect("Failed to initialize tracepoints");
 
+    //可以注释掉，暂时不使用
     crate::ebpf::init_ebpf();
+    //可以注释掉，暂时不使用
     crate::perf::perf_event_init();
+    //可以注释掉，暂时不使用
     crate::kmod::init_kmod();
 
     pseudofs::mount_all().expect("Failed to mount pseudofs");
     spawn_alarm_task();
+    //可以注释掉，暂时不使用
     pseudofs::usbfs::start_event_pump();
 
+    //当物理内存分配失败时，分配器优先淘汰page cache中的干净页面
+    //暂时也可以不需要
     ax_alloc::register_page_reclaim_fn(ax_fs_ng::vfs::page_cache_reclaim);
 
     let loc = FS_CONTEXT
