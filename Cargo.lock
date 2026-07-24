@@ -1039,13 +1039,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ax-riscv-plic"
-version = "0.4.7"
-dependencies = [
- "tock-registers 0.10.1",
-]
-
-[[package]]
 name = "ax-runtime"
 version = "0.8.1"
 dependencies = [
@@ -7230,7 +7223,6 @@ dependencies = [
  "aarch64-cpu 11.2.0",
  "anyhow",
  "arm-gic-driver",
- "ax-riscv-plic",
  "kernutil",
  "log",
  "loongArch64",

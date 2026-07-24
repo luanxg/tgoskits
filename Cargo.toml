@@ -165,7 +165,7 @@ ax-plat-loongarch64-qemu-virt = { version = "0.5.16", path = "platforms/ax-plat-
 ax-plat-macros = { version = "0.3.8", path = "platforms/ax-plat-macros" }
 
 ax-posix-api = { version = "0.5.22", path = "os/arceos/api/arceos_posix_api" }
-ax-riscv-plic = { version = "0.4.7", path = "drivers/intc/riscv_plic" }
+
 ax-runtime = { version = "0.8.1", path = "os/arceos/modules/axruntime" }
 ax-sched = { version = "0.5.7", path = "components/axsched" }
 ax-std = { version = "0.5.21", path = "os/arceos/ulib/axstd" }
