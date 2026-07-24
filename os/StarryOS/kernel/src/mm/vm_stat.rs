@@ -1,43 +1,41 @@
-//! Per-address-space virtual memory accounting (VmX).
+//! 每个地址空间的虚拟内存统计 (VmX)。
 //!
-//! [`ProcessVmStat`] is the single authoritative source for all VmX counters.
-//! It lives inside [`super::AddrSpace`] and is maintained automatically by
-//! `map` / `unmap` / `clear` / `try_clone`, so no syscall handler needs to
-//! touch it manually.
+//! [`ProcessVmStat`] 是所有 VmX 计数器的唯一权威来源。
+//! 它内置于 [`super::AddrSpace`] 中，由 `map` / `unmap` / `clear` /
+//! `try_clone` 自动维护，因此任何 syscall 处理函数都无需手动操作它。
 //!
-//! # Counter categories
+//! # 计数器分类
 //!
-//! | Category | Fields | Update rule |
+//! | 类别 | 字段 | 更新规则 |
 //! |---|---|---|
-//! | Current (O(1) atomic) | `vss_pages` | +size on map, -size on unmap/clear |
-//! | High-water marks | `peak_vss_pages`, `peak_rss_pages` | `fetch_max` on map |
-//! | RSS (Plan2) | `rss_pages` | reserved, always 0 until Plan2 |
+//! | 当前值 (O(1) 原子) | `vss_pages` | map 时 +size, unmap/clear 时 -size |
+//! | 高水位线 | `peak_vss_pages`, `peak_rss_pages` | map 时 `fetch_max` |
+//! | RSS (Plan2) | `rss_pages` | 保留字段，Plan2 之前始终为 0 |
 //!
-//! Current VSS is maintained as an `AtomicI64` (signed) so that a
-//! double-unmap or a race never wraps to u64::MAX; it is always read as
-//! `max(0, value)`.
+//! 当前 VSS 使用 `AtomicI64`（有符号）维护，因此重复 unmap
+//! 或竞争条件永远不会回绕到 u64::MAX；读取时始终取
+//! `max(0, value)`。
 
 use core::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
-/// All VmX accounting for one address space.
+/// 单个地址空间的所有 VmX 统计信息。
 ///
-/// Fields are intentionally private; use the provided methods to read or
-/// update them.  This ensures the monotonicity invariant on the high-water
-/// marks is maintained by construction.
+/// 字段有意设为私有；请使用提供的方法进行读取或更新。
+/// 这确保了高水位线的单调性不变量由构造本身来保证。
 pub struct ProcessVmStat {
-    // ── Current counters (O(1), updated on every map/unmap) ──────────────
-    /// Current virtual size in pages (VmSize).  Signed to catch underflow bugs.
+    // ── 当前计数器 (O(1), 每次 map/unmap 时更新) ────────────────────────
+    /// 当前虚拟内存大小，以页为单位 (VmSize)。使用有符号类型以捕获下溢 bug。
     vss_pages: AtomicI64,
 
-    // ── High-water marks (monotonically non-decreasing) ──────────────────
-    /// Peak virtual size in pages (VmPeak).
+    // ── 高水位线 (单调非递减) ──────────────────────────────────────────
+    /// 虚拟内存大小的历史峰值，以页为单位 (VmPeak)。
     peak_vss_pages: AtomicU64,
-    /// Peak resident set size in pages (VmHWM).
-    /// Plan1: mirrors peak_vss.  Plan2: replace with real RSS tracking.
+    /// 常驻内存大小的历史峰值，以页为单位 (VmHWM)。
+    /// Plan1: 镜像 peak_vss。Plan2: 替换为真实的 RSS 追踪。
     peak_rss_pages: AtomicU64,
-    // ── RSS placeholder (Plan2) ───────────────────────────────────────────
-    // When Plan2 lands, add `rss_pages: AtomicI64` here and update it in the
-    // page-fault / reclaim paths.  High-water update should then use real RSS.
+    // ── RSS 占位符 (Plan2) ─────────────────────────────────────────────
+    // Plan2 落地后，在此处添加 `rss_pages: AtomicI64`，
+    // 并在缺页/回收路径中更新。届时高水位线应使用真实 RSS 更新。
 }
 
 impl ProcessVmStat {

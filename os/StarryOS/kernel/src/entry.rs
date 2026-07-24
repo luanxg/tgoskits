@@ -63,14 +63,14 @@ pub fn init(args: &[String], envs: &[String]) {
     let mut task = new_user_task(&name, uctx, 0);
     task.ctx_mut().set_page_table_root(uspace.page_table_root());
 
-    // PID 1 must really be 1: the init process is the root of the process
-    // hierarchy and userspace (e.g. systemd's `getpid() == 1` system-manager
-    // check) relies on it. The scheduler task id is an internal counter that is
-    // already past 1 by the time we spawn the user init (kernel helper tasks
-    // took the low ids), so we pin the user-visible pid/tid to 1 and leave the
-    // scheduler id untouched. `Thread::tid` is already decoupled from the
-    // scheduler id (see its field doc), so this only requires the table keys to
-    // follow the thread tid rather than `task.id()`.
+    // PID 1 必须真是 1：init 进程是进程树的根节点，用户态程序
+    // （比如 systemd 的 `getpid() == 1` 系统管理器检查）依赖这一点。
+    // 调度器的 task id 是一个内部计数器，到我们启动用户态 init 时，
+    // 它早就超过 1 了（内核辅助线程已经占用了低编号），因此我们把
+    // 用户可见的 pid/tid 固定为 1，同时保持调度器 id 不变。
+    // `Thread::tid` 已经与调度器 id 解耦（参见该字段的文档），
+    // 所以这里只需要让进程表中的 key 跟随 thread tid 而非
+    // `task.id()` 即可。
     const INIT_PID: Pid = 1;
     let pid = INIT_PID;
     let proc = Process::new_init(pid);
