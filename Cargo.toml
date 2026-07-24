@@ -54,8 +54,6 @@ members = [
     "components/ctor_bare/ctor_bare",
     "components/ctor_bare/ctor_bare_macros",
     "memory/*",
-    "virtualization/*",
-    "virtualization/test_crates/virtualization-tests",
     "components/percpu/percpu",
     "components/percpu/percpu_macros",
 
@@ -104,7 +102,6 @@ members = [
     "os/arceos/tools/deptool",
     "os/arceos/tools/raspi4/chainloader",
     "os/arceos/ulib/*",
-    "os/axvisor",
     "scripts/axbuild",
     "test-suit/arceos/rust",
     "apps/arceos/*",
@@ -116,16 +113,12 @@ members = [
 ]
 exclude = [
     "os/StarryOS/lkm/linux-hello",
-    "virtualization/test_crates",
 ]
 
 [workspace.dependencies]
 # Local workspace crates
-aarch64_sysreg = { version = "0.3.8", path = "virtualization/aarch64_sysreg" }
 arm-scmi-rs = { version = "0.1.3", path = "drivers/firmware/arm-scmi-rs" }
 arceos-test-suit = { version = "0.3.1", path = "test-suit/arceos/rust" }
-arm_vcpu = { version = "0.5.13", path = "virtualization/arm_vcpu" }
-arm_vgic = { version = "0.4.14", path = "virtualization/arm_vgic" }
 ax-alloc = { version = "0.8.5", path = "os/arceos/modules/axalloc", default-features = false }
 ax-allocator = { version = "0.5.3", path = "memory/axallocator" }
 ax-api = { version = "0.6.2", path = "os/arceos/api/arceos_api" }
@@ -179,22 +172,14 @@ ax-std = { version = "0.5.21", path = "os/arceos/ulib/axstd" }
 ax-sync = { version = "0.5.21", path = "os/arceos/modules/axsync" }
 ax-task = { version = "0.5.22", path = "os/arceos/modules/axtask" }
 ax-timer-list = { version = "0.3.5", path = "components/timer_list" }
-axaddrspace = { version = "0.5.14", path = "virtualization/axaddrspace" }
 axbacktrace = { version = "0.4.3", path = "components/axbacktrace" }
 axbuild = { version = "0.4.14", path = "scripts/axbuild" }
-axdevice = { version = "0.4.14", path = "virtualization/axdevice" }
-axdevice_base = { version = "0.5.0", path = "virtualization/axdevice_base" }
 axfs-ng-vfs = { version = "0.5.1", path = "components/axfs-ng-vfs" }
-axhvc = { version = "0.4.9", path = "virtualization/axhvc" }
 axklib = { version = "0.6.5", path = "components/axklib" }
 axplat-dyn = { version = "0.7.5", path = "platforms/axplat-dyn", default-features = false }
 ax-plat-riscv64-visionfive2 = { version = "0.1.10", path = "platforms/ax-plat-riscv64-visionfive2" }
 axpoll = { version = "0.4.1", path = "components/axpoll" }
-axvcpu = { version = "0.7.1", path = "virtualization/axvcpu" }
 axvisor = { version = "0.5.14", path = "os/axvisor" }
-axvm = { version = "0.5.16", path = "virtualization/axvm", default-features = false }
-axvm-types = { version = "0.5.13", path = "virtualization/axvm-types" }
-axvmconfig = { version = "0.7.2", path = "virtualization/axvmconfig", default-features = false }
 bitmap-allocator = { version = "0.4.6", path = "memory/bitmap-allocator" }
 bwbench-client = { version = "0.3.1", path = "os/arceos/tools/bwbench_client" }
 define-simple-traits = { version = "0.3.4", path = "components/crate_interface/test_crates/define-simple-traits" }
@@ -207,11 +192,7 @@ impl-weak-traits = { version = "0.3.4", path = "components/crate_interface/test_
 arm-gic-driver = { version = "0.17.6", path = "drivers/intc/arm-gic-driver" }
 enumerate = { version = "0.1.1", path = "drivers/examples/enumerate" }
 eth-intel = { version = "0.1.7", path = "drivers/net/eth-intel" }
-loongarch_vcpu = { version = "0.5.7", path = "virtualization/loongarch_vcpu" }
 mingo = { version = "0.8.3", path = "os/arceos/tools/raspi4/chainloader" }
-riscv-h = { version = "0.4.8", path = "virtualization/riscv-h" }
-riscv_vcpu = { version = "0.5.14", path = "virtualization/riscv_vcpu" }
-riscv_vplic = { version = "0.4.16", path = "virtualization/riscv_vplic" }
 nvme-driver = { version = "0.6.1", path = "drivers/blk/nvme-driver" }
 pcie = { version = "0.6.5", path = "drivers/pci/pcie" }
 ramdisk = { version = "0.1.6", path = "drivers/blk/ramdisk" }
@@ -266,8 +247,6 @@ test-weak-partial = { version = "0.3.4", path = "components/crate_interface/test
 tg-xtask = { version = "0.5.11", path = "xtask" }
 axloader = { version = "0.5.11", path = "bootloader/axloader" }
 httpboot-protocol = { version = "0.1.0", default-features = false }
-x86_vcpu = { version = "0.5.14", path = "virtualization/x86_vcpu", default-features = false }
-x86_vlapic = { version = "0.4.15", path = "virtualization/x86_vlapic" }
 page-table-generic = { version = "0.7.3", path = "memory/page-table-generic" }
 someboot = { version = "0.2.3", path = "components/someboot" }
 some-serial = { version = "0.6.2", path = "drivers/serial/some-serial" }
