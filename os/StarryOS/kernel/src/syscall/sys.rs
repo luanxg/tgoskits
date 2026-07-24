@@ -651,20 +651,41 @@ pub fn sys_uname(name: *mut new_utsname) -> AxResult<isize> {
     let nodename = HOSTNAME_STORE.lock().clone();
     let domainname = DOMAINNAME_STORE.lock().clone();
     let uts = new_utsname {
-        sysname: signoname(0),
+        sysname: str2carr("Linux"),
         nodename,
-        release: signoname(0),
-        version: signoname(0),
-        machine: signoname(0),
+        release: str2carr("6.6.0-starry"),
+        version: str2carr("#1 StarryOS"),
+        machine: str2carr({
+            #[cfg(target_arch = "aarch64")]
+            { "aarch64" }
+            #[cfg(target_arch = "riscv64")]
+            { "riscv64" }
+            #[cfg(target_arch = "x86_64")]
+            { "x86_64" }
+            #[cfg(target_arch = "loongarch64")]
+            { "loongarch64" }
+            #[cfg(not(any(
+                target_arch = "aarch64",
+                target_arch = "riscv64",
+                target_arch = "x86_64",
+                target_arch = "loongarch64",
+            )))]
+            { "unknown" }
+        }),
         domainname,
     };
     name.vm_write(uts)?;
     Ok(0)
 }
 
-fn signoname(val: c_char) -> [c_char; 65] {
+/// Copy a string literal into a fixed-size `[c_char; 65]`.
+fn str2carr(s: &str) -> [c_char; 65] {
     let mut a = [0; 65];
-    a[0] = val;
+    let bytes = s.as_bytes();
+    let len = bytes.len().min(64);
+    unsafe {
+        core::ptr::copy_nonoverlapping(bytes.as_ptr(), a.as_mut_ptr().cast::<u8>(), len);
+    }
     a
 }
 
