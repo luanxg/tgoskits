@@ -20,9 +20,6 @@ use crate::{
 pub fn init(args: &[String], envs: &[String]) {
     //可以注释掉，暂时不使用
     // static_keys::global_init();
-    //可以注释掉，暂时不使用
-    crate::kmod::init_kmod();
-
     pseudofs::mount_all().expect("Failed to mount pseudofs");
     spawn_alarm_task();
     //可以注释掉，暂时不使用

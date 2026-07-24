@@ -20,7 +20,6 @@ pub mod entry;
 
 mod config;
 mod file;
-mod kmod;
 pub mod kprobe;
 mod mm;
 mod pseudofs;

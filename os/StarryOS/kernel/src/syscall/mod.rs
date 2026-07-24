@@ -1,7 +1,6 @@
 mod fs;
 mod io_mpx;
 mod ipc;
-mod kmod;
 mod mm;
 mod net;
 mod resources;
@@ -944,13 +943,10 @@ pub fn handle_syscall(uctx: &mut UserContext) {
             warn!("perf_event_open is not supported");
             Err(AxError::from(LinuxError::ENOSYS))
         }
-        Sysno::init_module => {
-            kmod::sys_init_module(uctx.arg0() as _, uctx.arg1() as _, uctx.arg2() as _)
+        Sysno::init_module | Sysno::finit_module | Sysno::delete_module => {
+            warn!("kernel module loading is not supported");
+            Err(AxError::from(LinuxError::ENOSYS))
         }
-        Sysno::finit_module => {
-            kmod::sys_finit_module(uctx.arg0() as _, uctx.arg1() as _, uctx.arg2() as _)
-        }
-        Sysno::delete_module => kmod::sys_delete_module(uctx.arg0() as _, uctx.arg1() as _),
 
         Sysno::fanotify_init => Err(AxError::Unsupported),
 
