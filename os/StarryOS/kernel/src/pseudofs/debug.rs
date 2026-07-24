@@ -12,7 +12,5 @@ pub fn new_debugfs() -> axfs_ng_vfs::Filesystem {
 
 fn debugfs_builder(fs: Arc<SimpleFs>) -> DirMaker {
     let mut root = DirMapping::new();
-    let tracing = crate::tracepoint::init_tracing_dir(fs.clone());
-    root.add("tracing", tracing);
     SimpleDir::new_maker(fs, Arc::new(root))
 }

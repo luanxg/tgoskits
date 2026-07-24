@@ -28,6 +28,5 @@ mod stop_machine;
 mod syscall;
 mod task;
 mod time;
-mod tracepoint;
 mod trap;
 mod uprobe;

@@ -14,16 +14,12 @@ use crate::{
     mm::{copy_from_kernel, load_user_app, new_user_aspace_empty},
     pseudofs::{self, dev::tty::N_TTY},
     task::{ProcessData, ProcessImage, Thread, add_task_to_table, new_user_task, spawn_alarm_task},
-    tracepoint::tracepoint_init,
 };
 
 /// Initialize and run initproc.
 pub fn init(args: &[String], envs: &[String]) {
     //可以注释掉，暂时不使用
-    static_keys::global_init();
-    //可以注释掉，暂时不使用
-    tracepoint_init().expect("Failed to initialize tracepoints");
-
+    // static_keys::global_init();
     //可以注释掉，暂时不使用
     crate::kmod::init_kmod();
 

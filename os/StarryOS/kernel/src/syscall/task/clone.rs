@@ -60,33 +60,6 @@ bitflags! {
     }
 }
 
-// The `sched:sched_process_fork` tracepoint is defined here, next to its sole
-// emission site in `CloneArgs::do_clone` (which all of clone/clone3/fork/vfork
-// funnel through), so the event schema and the fast-path call stay together.
-// Registration into the global `.tracepoint` section is by link section, so
-// the definition's module location is immaterial to discovery.
-ktracepoint::define_event_trace!(
-    sched_process_fork,
-    TP_kops(crate::tracepoint::KernelTraceAux),
-    TP_system(sched),
-    TP_PROTO(parent_tid: u64, child_tid: u64),
-    TP_STRUCT__entry {
-        parent_tid: u64,
-        child_tid: u64,
-    },
-    TP_fast_assign {
-        parent_tid: parent_tid,
-        child_tid: child_tid,
-    },
-    TP_ident(__entry),
-    TP_printk({
-        alloc::format!(
-            "parent_tid={} child_tid={}",
-            __entry.parent_tid,
-            __entry.child_tid,
-        )
-    })
-);
 
 /// Unified arguments for clone/clone3/fork/vfork.
 #[derive(Debug, Clone, Copy, Default)]
@@ -328,7 +301,6 @@ impl CloneArgs {
 
         // Fire before any potential vfork-wait so observers see the fork edge
         // even when the parent blocks below.
-        trace_sched_process_fork(curr.id().as_u64(), tid as u64);
 
         // Block the parent until the child exec's or exits.
         if needs_vfork_block {
@@ -339,29 +311,6 @@ impl CloneArgs {
     }
 }
 
-ktracepoint::define_event_trace!(
-    sys_clone,
-    TP_kops(crate::tracepoint::KernelTraceAux),
-    TP_system(syscalls),
-    TP_PROTO(flags:u32, stack:usize, parent_tid:usize),
-    TP_STRUCT__entry {
-        stack: usize,
-        parent_tid: usize,
-        flags: u32,
-    },
-    TP_fast_assign {
-        flags: flags,
-        stack: stack,
-        parent_tid: parent_tid,
-    },
-    TP_ident(__entry),
-    TP_printk({
-        let flags = __entry.flags;
-        let stack = __entry.stack;
-        let parent_tid = __entry.parent_tid;
-        alloc::format!("clone with flags: {flags}, stack: {stack:#x}, parent_tid: {parent_tid:#x}")
-    })
-);
 
 pub fn sys_clone(
     uctx: &UserContext,
@@ -376,7 +325,6 @@ pub fn sys_clone(
     let clone_flags = CloneFlags::from_bits_truncate((flags & !FLAG_MASK) as u64);
     let exit_signal = (flags & FLAG_MASK) as u64;
 
-    trace_sys_clone(clone_flags.bits() as _, stack, parent_tid);
 
     if clone_flags.contains(CloneFlags::PIDFD | CloneFlags::PARENT_SETTID) {
         return Err(AxError::InvalidInput);

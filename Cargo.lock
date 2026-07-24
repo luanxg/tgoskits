@@ -4439,19 +4439,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ktracepoint"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30aa94490986294aa3a19dc3fbc6b7eefe3fbbac18c323c4153a0cfd1a7a0b74"
-dependencies = [
- "log",
- "lru 0.18.0",
- "paste",
- "static-keys",
- "tp-lexer",
-]
-
-[[package]]
 name = "lab"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7320,7 +7307,6 @@ dependencies = [
  "kmod-tools",
  "kprobe",
  "ksym",
- "ktracepoint",
  "linux-raw-sys 0.12.1",
  "lock_api",
  "lwprintf-rs",
@@ -8134,12 +8120,6 @@ name = "tower-service"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
-
-[[package]]
-name = "tp-lexer"
-version = "0.5.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5352c5c9721b4ded5d79c4ad60111b977601c09b202e860a3d79a6e4bdb098b0"
 
 [[package]]
 name = "tracing"
