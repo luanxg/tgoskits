@@ -1,8 +1,0 @@
-features = [
-    "ept-level-4",
-    "ax-driver/virtio-blk",
-    "fs",
-]
-log = "Info"
-target = "aarch64-unknown-none-softfloat"
-vm_configs = []
