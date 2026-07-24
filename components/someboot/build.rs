@@ -132,15 +132,3 @@ impl Build {
         out_file.write_all(formatted.as_bytes()).unwrap();
     }
 }
-
-fn env_u64(name: &str) -> Option<u64> {
-    println!("cargo:rerun-if-env-changed={name}");
-    let value = std::env::var(name).ok()?;
-    let value = value.replace('_', "");
-    let value = value.trim();
-    if let Some(hex) = value.strip_prefix("0x") {
-        u64::from_str_radix(hex, 16).ok()
-    } else {
-        value.parse().ok()
-    }
-}
