@@ -88,15 +88,6 @@ pub fn new_user_task(name: &str, mut uctx: UserContext, set_child_tid: usize) ->
                             {
                                 break 'exc;
                             }
-                            // x86_64 completes the out-of-line single-step via a
-                            // #DB; other arches handle stepping inside the
-                            // breakpoint path, so the debug hook is x86_64-only.
-                            #[cfg(target_arch = "x86_64")]
-                            ExceptionKind::Debug
-                                if crate::uprobe::debug_uprobe_handler(&mut uctx).is_some() =>
-                            {
-                                break 'exc;
-                            }
                             _ => {}
                         }
                         warn!(
@@ -196,64 +187,4 @@ fn exception_ec_value(exc_info: &ExceptionInfo) -> u64 {
 #[cfg(target_arch = "aarch64")]
 fn exception_iss_value(exc_info: &ExceptionInfo) -> u64 {
     exc_info.iss_value()
-}
-
-#[cfg(target_arch = "riscv64")]
-fn exception_fault_addr(exc_info: &ExceptionInfo) -> usize {
-    exc_info.stval
-}
-
-#[cfg(target_arch = "riscv64")]
-fn exception_esr_value(_exc_info: &ExceptionInfo) -> u64 {
-    0
-}
-
-#[cfg(target_arch = "riscv64")]
-fn exception_ec_value(_exc_info: &ExceptionInfo) -> u64 {
-    0
-}
-
-#[cfg(target_arch = "riscv64")]
-fn exception_iss_value(_exc_info: &ExceptionInfo) -> u64 {
-    0
-}
-
-#[cfg(target_arch = "loongarch64")]
-fn exception_fault_addr(exc_info: &ExceptionInfo) -> usize {
-    exc_info.badv
-}
-
-#[cfg(target_arch = "loongarch64")]
-fn exception_esr_value(_exc_info: &ExceptionInfo) -> u64 {
-    0
-}
-
-#[cfg(target_arch = "loongarch64")]
-fn exception_ec_value(_exc_info: &ExceptionInfo) -> u64 {
-    _exc_info.ecode as u64
-}
-
-#[cfg(target_arch = "loongarch64")]
-fn exception_iss_value(_exc_info: &ExceptionInfo) -> u64 {
-    _exc_info.esubcode as u64
-}
-
-#[cfg(target_arch = "x86_64")]
-fn exception_fault_addr(exc_info: &ExceptionInfo) -> usize {
-    exc_info.cr2
-}
-
-#[cfg(target_arch = "x86_64")]
-fn exception_esr_value(_exc_info: &ExceptionInfo) -> u64 {
-    0
-}
-
-#[cfg(target_arch = "x86_64")]
-fn exception_ec_value(_exc_info: &ExceptionInfo) -> u64 {
-    0
-}
-
-#[cfg(target_arch = "x86_64")]
-fn exception_iss_value(_exc_info: &ExceptionInfo) -> u64 {
-    0
 }

@@ -15,7 +15,7 @@ fn starry_snapshot_store_round_trips() {
         target: Some(DEFAULT_STARRY_TARGET.into()),
         smp: None,
         config: Some(PathBuf::from(
-            "tmp/axbuild/config/starryos/build-riscv64gc-unknown-none-elf.toml",
+            "tmp/axbuild/config/starryos/build-aarch64-unknown-none-softfloat.toml",
         )),
         qemu: StarryQemuSnapshot {
             qemu_config: Some(PathBuf::from("configs/qemu.toml")),
