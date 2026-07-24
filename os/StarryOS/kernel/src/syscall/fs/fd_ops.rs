@@ -14,7 +14,7 @@ use starry_vm::{VmMutPtr, VmPtr};
 
 use crate::{
     file::{
-        Directory, FD_TABLE, File, FileDescriptor, FileLike, NsFd, Pipe, add_file_like,
+        Directory, FD_TABLE, File, FileDescriptor, FileLike, Pipe, add_file_like,
         close_file_like, get_file_like, memfd::Memfd, with_fs,
     },
     mm::vm_load_string,
@@ -205,22 +205,7 @@ fn try_open_nsfd(path: &str, flags: u32) -> Option<AxResult<i32>> {
         Err(_) => return Some(Err(AxError::NotFound)),
     };
 
-    let nsproxy = proc_data.nsproxy.lock();
-
-    let nsfd: NsFd = match ns_type_str {
-        "uts" => NsFd::Uts(nsproxy.uts_ns.clone()),
-        "ipc" => NsFd::Ipc(nsproxy.ipc_ns.clone()),
-        "mnt" => NsFd::Mnt(nsproxy.mnt_ns.clone()),
-        "pid" => NsFd::Pid(nsproxy.pid_ns.clone()),
-        "net" => NsFd::Net(nsproxy.net_ns.clone()),
-        "user" => NsFd::User(nsproxy.user_ns.clone()),
-        _ => return Some(Err(AxError::NotFound)),
-    };
-
-    drop(nsproxy);
-
-    let fd = nsfd.add_to_fd_table(flags & O_CLOEXEC != 0);
-    Some(fd)
+    Some(Err(AxError::NotFound))
 }
 
 ktracepoint::define_event_trace!(

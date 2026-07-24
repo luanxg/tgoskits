@@ -512,7 +512,7 @@ pub fn sys_shmget(key: i32, size: usize, shmflg: usize) -> AxResult<isize> {
     let thread = curr.as_thread();
     let cur_pid = thread.proc_data.proc.pid();
     let cred = thread.cred();
-    let ns_id = thread.proc_data.nsproxy.lock().ipc_ns.lock().ns_id;
+    let ns_id = 0u64;
     let mut shm_manager = SHM_MANAGER.lock();
 
     if key != IPC_PRIVATE {
@@ -567,7 +567,7 @@ pub fn sys_shmat(shmid: i32, addr: usize, shmflg: u32) -> AxResult<isize> {
     // mapping work to avoid holding the global lock across aspace ops.
     let shm_inner_arc = {
         let shm_manager = SHM_MANAGER.lock();
-        let ns_id = proc_data.nsproxy.lock().ipc_ns.lock().ns_id;
+        let ns_id = 0u64;
         shm_manager
             .get_inner_by_shmid(shmid, ns_id)
             .ok_or(AxError::InvalidInput)?
@@ -652,7 +652,7 @@ pub fn sys_shmctl(shmid: i32, cmd: u32, buf: UserPtr<ShmidDs>) -> AxResult<isize
     let curr = current();
     let thread = curr.as_thread();
     let cred = thread.cred();
-    let ns_id = thread.proc_data.nsproxy.lock().ipc_ns.lock().ns_id;
+    let ns_id = 0u64;
 
     // IPC_INFO: system-wide shared memory limits (no segment lookup).
     if cmd == IPC_INFO {
@@ -798,7 +798,7 @@ pub fn sys_shmdt(shmaddr: usize) -> AxResult<isize> {
     // Look up shmid and grab the inner Arc while holding SHM_MANAGER.
     let (shmid, shm_inner_arc) = {
         let shm_manager = SHM_MANAGER.lock();
-        let ns_id = proc_data.nsproxy.lock().ipc_ns.lock().ns_id;
+        let ns_id = 0u64;
         let shmid = shm_manager
             .get_shmid_by_vaddr(pid, shmaddr)
             .ok_or(AxError::InvalidInput)?;

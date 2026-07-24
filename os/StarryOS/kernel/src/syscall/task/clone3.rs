@@ -21,7 +21,6 @@ pub struct Clone3Args {
     pub tls: u64,
     pub set_tid: u64,
     pub set_tid_size: u64,
-    pub cgroup: u64,
 }
 
 const MIN_CLONE_ARGS_SIZE: usize = core::mem::size_of::<u64>() * 8;
@@ -33,10 +32,6 @@ impl TryFrom<Clone3Args> for CloneArgs {
         if args.set_tid != 0 || args.set_tid_size != 0 {
             warn!("sys_clone3: set_tid/set_tid_size not supported, ignoring");
         }
-        if args.cgroup != 0 {
-            warn!("sys_clone3: cgroup parameter not supported, ignoring");
-        }
-
         let flags = CloneFlags::from_bits_truncate(args.flags);
 
         if args.exit_signal > 0 && flags.intersects(CloneFlags::THREAD | CloneFlags::PARENT) {

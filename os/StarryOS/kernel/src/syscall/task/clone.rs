@@ -39,8 +39,6 @@ bitflags! {
         const PARENT = CLONE_PARENT as u64;
         /// The child is placed in the same thread group as the calling process.
         const THREAD = CLONE_THREAD as u64;
-        /// The cloned child is started in a new mount namespace.
-        const NEWNS = CLONE_NEWNS as u64;
         /// The child and the calling process share a single list of System V
         /// semaphore adjustment values.
         const SYSVSEM = CLONE_SYSVSEM as u64;
@@ -53,24 +51,10 @@ bitflags! {
         const CHILD_CLEARTID = CLONE_CHILD_CLEARTID as u64;
         /// Store the child thread ID in the child's memory.
         const CHILD_SETTID = CLONE_CHILD_SETTID as u64;
-        /// Create the process in a new cgroup namespace.
-        const NEWCGROUP = CLONE_NEWCGROUP as u64;
-        /// Create the process in a new UTS namespace.
-        const NEWUTS = CLONE_NEWUTS as u64;
-        /// Create the process in a new IPC namespace.
-        const NEWIPC = CLONE_NEWIPC as u64;
-        /// Create the process in a new user namespace.
-        const NEWUSER = CLONE_NEWUSER as u64;
-        /// Create the process in a new PID namespace.
-        const NEWPID = CLONE_NEWPID as u64;
-        /// Create the process in a new network namespace.
-        const NEWNET = CLONE_NEWNET as u64;
         /// The new process shares an I/O context with the calling process.
         const IO = CLONE_IO as u64;
         /// Clear signal handlers on clone (since Linux 5.5).
         const CLEAR_SIGHAND = 0x100000000u64;
-        /// Clone into specific cgroup (since Linux 5.7).
-        const INTO_CGROUP = 0x200000000u64;
         /// (Deprecated) Causes the parent not to receive a signal when the child terminated.
         const DETACHED = CLONE_DETACHED as u64;
     }
@@ -137,12 +121,6 @@ impl CloneArgs {
             return Err(AxError::InvalidInput);
         }
         if flags.contains(CloneFlags::PIDFD | CloneFlags::DETACHED) {
-            return Err(AxError::InvalidInput);
-        }
-
-        // CLONE_NEWCGROUP is not yet implemented.
-        if flags.contains(CloneFlags::NEWCGROUP) {
-            error!("sys_clone/sys_clone3: unsupported namespace flag CLONE_NEWCGROUP");
             return Err(AxError::InvalidInput);
         }
 
@@ -280,42 +258,6 @@ impl CloneArgs {
             // fork child PR_GET_DUMPABLE returns 0.
             proc_data.set_dumpable(old_proc_data.dumpable());
             proc_data.set_thp_disable(old_proc_data.thp_disable());
-
-            // Inherit the parent's namespace proxy, then unshare
-            // each namespace for which a CLONE_NEW* flag is set.
-            let mut new_nsproxy = old_proc_data.nsproxy.lock().clone_all();
-            if flags.contains(CloneFlags::NEWUTS) {
-                new_nsproxy.unshare_uts();
-            }
-            if flags.contains(CloneFlags::NEWIPC) {
-                new_nsproxy.unshare_ipc();
-            }
-            if flags.contains(CloneFlags::NEWNS) {
-                new_nsproxy.unshare_mnt();
-            }
-            if flags.contains(CloneFlags::NEWPID) {
-                new_nsproxy.unshare_pid();
-                new_nsproxy.pid_ns.lock().alloc_local_pid(tid as u64);
-            }
-            if flags.contains(CloneFlags::NEWNET) {
-                new_nsproxy.unshare_net();
-            }
-            if flags.contains(CloneFlags::NEWUSER) {
-                new_nsproxy.unshare_user();
-            }
-
-            // Consume a pending child PID namespace prepared by
-            // unshare(CLONE_NEWPID) in the parent (Linux: the parent is
-            // not moved; the child becomes PID 1 in the new namespace).
-            if !flags.contains(CloneFlags::NEWPID) {
-                let mut parent_ns = old_proc_data.nsproxy.lock();
-                if let Some(child_pid_ns) = parent_ns.child_pid_ns.take() {
-                    new_nsproxy.pid_ns = child_pid_ns;
-                    new_nsproxy.pid_ns.lock().alloc_local_pid(tid as u64);
-                }
-            }
-
-            *proc_data.nsproxy.lock() = new_nsproxy;
 
             {
                 let mut scope = proc_data.scope.write();

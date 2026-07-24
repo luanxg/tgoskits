@@ -90,7 +90,6 @@ rdrive.workspace = true
 
 axbacktrace = { workspace = true }
 ax-errno = { workspace = true }
-axnsproxy = { workspace = true }
 axfs-ng-vfs = { workspace = true }
 rdif-block = { workspace = true }
 ax-io = { workspace = true }

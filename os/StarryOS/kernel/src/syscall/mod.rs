@@ -4,7 +4,6 @@ mod ipc;
 mod kmod;
 mod mm;
 mod net;
-mod ns;
 mod resources;
 mod signal;
 mod sync;
@@ -18,10 +17,16 @@ use starry_signal::Signo;
 use syscalls::Sysno;
 
 pub use self::{
-    fs::*, io_mpx::*, ipc::*, mm::*, net::*, ns::*, resources::*, signal::*, sync::*, sys::*,
+    fs::*, io_mpx::*, ipc::*, mm::*, net::*, resources::*, signal::*, sync::*, sys::*,
     task::*, time::*,
 };
 use crate::task::{AsThread, SeccompDecision, do_exit, seccomp_errno};
+
+/// Always returns `true` — namespace support has been removed, so all
+/// processes are in the root network namespace.
+pub fn in_root_net_ns() -> bool {
+    true
+}
 
 pub fn syscall_allows_signal_restart(sysno: usize) -> bool {
     !matches!(Sysno::new(sysno), Some(Sysno::msgsnd | Sysno::msgrcv))
@@ -681,8 +686,14 @@ pub fn handle_syscall(uctx: &mut UserContext) {
         Sysno::fork => sys_fork(uctx),
         #[cfg(target_arch = "x86_64")]
         Sysno::vfork => sys_vfork(uctx),
-        Sysno::unshare => sys_unshare(uctx.arg0() as _),
-        Sysno::setns => sys_setns(uctx.arg0() as _, uctx.arg1() as _),
+        Sysno::unshare => {
+            warn!("unshare is not supported");
+            Err(AxError::from(LinuxError::ENOSYS))
+        }
+        Sysno::setns => {
+            warn!("setns is not supported");
+            Err(AxError::from(LinuxError::ENOSYS))
+        }
         Sysno::exit => sys_exit(uctx.arg0() as _),
         Sysno::exit_group => sys_exit_group(uctx.arg0() as _),
         Sysno::wait4 => sys_waitpid(uctx.arg0() as _, uctx.arg1() as _, uctx.arg2() as _),

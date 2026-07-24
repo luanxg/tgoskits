@@ -8,7 +8,6 @@ pub mod ion;
 pub mod memfd;
 mod net;
 pub mod netlink;
-mod nsfd;
 mod packet;
 mod pidfd;
 mod pipe;
@@ -37,7 +36,6 @@ pub use self::{
     fs::{Directory, File, ResolveAtResult, resolve_at, with_fs},
     io_uring::IoUring,
     net::Socket,
-    nsfd::NsFd,
     packet::{PacketSocket, SockAddrLl},
     pidfd::PidFd,
     pipe::Pipe,

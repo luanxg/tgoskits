@@ -7334,7 +7334,6 @@ dependencies = [
  "axbacktrace",
  "axfs-ng-vfs",
  "axklib",
- "axnsproxy",
  "axplat-dyn",
  "axpoll",
  "bitflags 2.13.0",
