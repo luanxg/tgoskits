@@ -50,19 +50,13 @@ fn main() {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum Arch {
     #[default]
-    Loongarch64,
-    Arch64,
-    X86_64,
-    Riscv64,
+    Aarch64,
 }
 
 impl From<&str> for Arch {
     fn from(s: &str) -> Self {
         match s {
-            "loongarch64" => Arch::Loongarch64,
-            "aarch64" => Arch::Arch64,
-            "x86_64" => Arch::X86_64,
-            "riscv64" => Arch::Riscv64,
+            "aarch64" => Arch::Aarch64,
             _ => panic!("unsupported target arch: {s}"),
         }
     }
@@ -88,10 +82,7 @@ impl Build {
         }
 
         match self.arch {
-            Arch::Loongarch64 => self.prepare_loongarch64(),
-            Arch::Arch64 => self.prepare_aarch64(),
-            Arch::X86_64 => self.prepare_x86_64(),
-            Arch::Riscv64 => self.prepare_riscv64(),
+            Arch::Aarch64 => self.prepare_aarch64(),
         }
 
         self.gen_defines();
@@ -112,33 +103,6 @@ impl Build {
             println!("cargo:rustc-cfg=efi");
         }
         self.write_linker_script(LinkerArch::Aarch64);
-    }
-
-    fn prepare_loongarch64(&mut self) {
-        self.kernel_vaddr = 0xffff_ffff_8000_0000;
-
-        println!("cargo:rustc-cfg=efi");
-
-        self.write_linker_script(LinkerArch::Loongarch64);
-    }
-
-    fn prepare_x86_64(&mut self) {
-        self.kernel_vaddr = 0xffff_ffff_8000_0000;
-
-        println!("cargo:rustc-cfg=efi");
-
-        self.write_linker_script(LinkerArch::X86_64);
-    }
-
-    fn prepare_riscv64(&mut self) {
-        self.kernel_paddr = env_u64("SOMEBOOT_RISCV64_KERNEL_LOAD_PADDR").unwrap_or(0x8020_0000);
-        if self.uspace || self.hv {
-            self.kernel_vaddr = 0xffff_ffff_8000_0000;
-        } else {
-            self.kernel_vaddr = self.kernel_paddr;
-        }
-
-        self.write_linker_script(LinkerArch::Riscv64);
     }
 
     fn write_linker_script(&self, arch: LinkerArch) {
