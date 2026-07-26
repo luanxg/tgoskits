@@ -19,11 +19,11 @@ fn cap_bit(cap: u32) -> u64 {
     if cap <= CAP_LAST_CAP { 1u64 << cap } else { 0 }
 }
 
-/// Process credentials used for identity and permission checks.
+/// 进程凭证，用于身份和权限检查。
 ///
-/// The capability fields mirror Linux's inheritable, permitted, effective,
-/// bounding, and ambient sets.  StarryOS stores the currently known capability
-/// range in a `u64`, which is sufficient for `CAP_LAST_CAP`.
+/// capability 各字段对应 Linux 的 inheritable、permitted、effective、
+/// bounding 和 ambient 集合。StarryOS 将当前已知的 capability 范围
+/// 存储在 `u64` 中，这对于 `CAP_LAST_CAP` 已经足够。
 #[derive(Clone, Debug)]
 pub struct Cred {
     /// Real user ID.

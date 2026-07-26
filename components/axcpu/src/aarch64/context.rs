@@ -13,13 +13,12 @@ pub struct TrapFrame {
     /// Saved Process Status Register (SPSR_EL1).
     pub spsr: u64,
 
-    /// Stack pointer at the time of the exception.
-    /// Populated by SAVE_REGS as `sp_before_sub = sp_after_sub + trapframe_size`.
+    /// 异常发生时的栈指针。
+    /// 由 SAVE_REGS 保存，计算方式为：sp_before_sub = sp_after_sub + trapframe_size。
     ///
-    /// Note: This field is read-only (saved by SAVE_REGS for inspection only).
-    /// The actual SP is restored by RESTORE_REGS via `add sp, sp, #trapframe_size`,
-    /// not from this field. Modifying this value will NOT affect the actual SP
-    /// after exception return.
+    /// 注意：此字段是只读的（由 SAVE_REGS 保存，仅供查看）。
+    /// 实际的 SP 是由 RESTORE_REGS 通过 `add sp, sp, #trapframe_size` 恢复的，
+    /// 而非从此字段读取。修改此值**不会**影响异常返回后的实际 SP。
     pub sp: u64,
 }
 

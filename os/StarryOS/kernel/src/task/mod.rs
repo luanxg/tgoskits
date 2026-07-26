@@ -178,10 +178,10 @@ pub struct Thread {
 }
 
 impl Thread {
-    /// Create a new [`Thread`].
+    /// 创建一个新的 [`Thread`]。
     ///
-    /// If `parent_cred` is `Some`, the thread inherits the parent's credentials;
-    /// otherwise it starts with root credentials (used for the init process).
+    /// 若 `parent_cred` 为 `Some`，线程将继承父进程的凭证；
+    /// 否则以 root 凭证启动（用于 init 进程）。
     pub fn new(
         tid: u32,
         proc_data: Arc<ProcessData>,
@@ -572,107 +572,105 @@ impl ProcessImage {
 }
 
 pub struct ProcessData {
-    /// The process.
+    /// 进程。
     pub proc: Arc<Process>,
-    /// The executable path
+    /// 可执行文件路径。
     pub exe_path: RwLock<String>,
-    /// The command line arguments
+    /// 命令行参数。
     pub cmdline: RwLock<Arc<Vec<String>>>,
-    /// Auxiliary vector entries exported via `/proc/[pid]/auxv`.
+    /// 通过 /proc/[pid]/auxv 暴露的辅助向量条目。
     pub auxv: RwLock<Vec<AuxEntry>>,
-    /// The virtual memory address space.
-    // TODO: scopify
+    /// 虚拟内存地址空间。 
+    // TODO: 限定作用域
     aspace: SpinNoIrq<Arc<Mutex<AddrSpace>>>,
-    /// The resource scope
+    /// 资源作用域。
     pub scope: RwLock<Scope>,
-    /// The user heap top
+    /// 用户堆顶地址。
     heap_top: AtomicUsize,
 
-    /// The resource limits
+    /// 资源限制。
     pub rlim: RwLock<Rlimits>,
 
-    /// The child exit wait event
+    /// 子进程退出等待事件。
     pub child_exit_event: Arc<PollSet>,
-    /// Self exit event
+    /// 自身退出事件。
     pub exit_event: Arc<PollSet>,
-    /// Woken every time a thread in this process exits. Used by a thread
-    /// performing `execve` to wait for siblings to be reaped.
+    /// 当本进程中的某个线程退出时被唤醒。由执行 execve 的 
+    /// 线程用于等待兄弟线程被回收。
     pub thread_exit_event: Arc<PollSet>,
-    /// Serializes `execve` within the process. Only one thread can be
-    /// tearing down the thread group at a time; concurrent attempts return
-    /// `EINTR` (the loser is about to be zapped anyway).
+    /// 对进程内的 execve进行串行化。同一时刻只允许一个线程 
+    /// 拆除线程组；并发尝试将返回EINTR（失败者反正也即将被清除）。
     pub exec_lock: Mutex<()>,
-    /// The exit signal of the thread
+    /// 线程的退出信号。
     pub exit_signal: Option<Signo>,
-    /// The thread in the parent thread group that created this process.
+    /// 父线程组中创建了本进程的线程。
     ///
-    /// Linux's `__WNOTHREAD` wait option restricts child selection to children
-    /// created by the calling thread, while the default wait may reap children
-    /// created by any thread in the same thread group.
+    /// Linux 的 `__WNOTHREAD` 等待选项将子进程选择范围限制为
+    /// 由调用线程所创建的子进程，而默认的等待则可以回收由
+    /// 同一线程组中任意线程创建的子进程。
     pub wait_parent_tid: Pid,
 
-    /// The process signal manager
+    /// 进程信号管理器。
     pub signal: Arc<ProcessSignalManager>,
 
-    /// The futex table.
+    /// futex 表。
     futex_table: Arc<FutexTable>,
 
-    /// If this process was created by vfork, this tracks completion state.
-    /// The parent waits until `done` becomes true. Protected by the same lock
-    /// as the wait queue to avoid lost wakeup races.
+    /// 如果本进程由 vfork 创建，此字段跟踪完成状态。 
+    /// 父进程等待直到 done 变为 true。使用与等待队列相同的锁 
+    /// 保护，以避免唤醒丢失的竞态条件。
     vfork_done: SpinNoIrq<Option<VforkDone>>,
 
-    /// The default mask for file permissions.
+    /// 文件权限的默认掩码（umask）。
     umask: AtomicU32,
 
-    /// The process nice value used by getpriority/setpriority compatibility.
+    /// 进程的 nice 值，用于 getpriority/setpriority 兼容。
     nice: AtomicI32,
 
-    /// Process-local membarrier(2) registration state bitmask.
+    /// 进程本地的 membarrier(2) 注册状态位掩码。
     membarrier_state: AtomicU32,
 
-    /// PR_GET_DUMPABLE / PR_SET_DUMPABLE value (default 1 = SUID_DUMP_USER).
-    /// Cleared to 0 (SUID_DUMP_DISABLE) whenever the effective UID/GID
-    /// changes via setuid/setresuid/setreuid (man 2 setuid §NOTES:
+    /// PR_GET_DUMPABLE / PR_SET_DUMPABLE 的值（默认 1 = SUID_DUMP_USER）。
+    /// 每当通过 setuid / setresuid / setreuid 改变有效 UID/GID 时，清为 0
+    /// （SUID_DUMP_DISABLE）（见 man 2 setuid §NOTES：
     /// "If uid is different from the old effective UID, the process will
-    /// be forbidden from leaving core dumps").
-    /// Linux stores this on `mm_struct`; StarryOS keeps it process-wide.
+    /// be forbidden from leaving core dumps"）。
+    /// Linux 将此字段保存在 `mm_struct` 上；StarryOS 将其维护为进程级字段。
     dumpable: AtomicI32,
 
-    /// PR_GET_THP_DISABLE / PR_SET_THP_DISABLE value.
-    /// StarryOS does not implement transparent huge pages, but userspace may
-    /// set this as a compatibility hint and later query it.
+    /// PR_GET_THP_DISABLE / PR_SET_THP_DISABLE 的值。
+    /// StarryOS 未实现透明大页，但用户空间可将其作为兼容性提示设置，
+    /// 并在之后查询。
     thp_disable: AtomicU32,
 
-    /// Accumulated CPU time of waited children (utime + stime).
-    /// Updated when wait() reaps a child.
+    /// 已等待子进程的累计 CPU 时间（utime + stime）。
+    /// 在 wait() 回收子进程时更新。
     children_cpu_time: SpinNoIrq<(TimeValue, TimeValue)>,
 
-    /// Linux process personality flags. Starry does not randomize userspace
-    /// mappings yet, but debuggers still probe and set ADDR_NO_RANDOMIZE.
+    /// Linux 进程 personality 标志。StarryOS 尚未对用户空间映射做随机化，
+    /// 但调试器仍会探测并设置 ADDR_NO_RANDOMIZE。
     personality: AtomicUsize,
 
-    /// POSIX per-process interval timers (timer_create/timer_settime/etc.)
+    /// POSIX 每进程间隔定时器（timer_create / timer_settime 等）
     pub posix_timers: Arc<PosixTimerTable>,
 
-    /// `true` when this process shares its [`AddrSpace`] with a parent/sibling
-    /// (`CLONE_VM`, e.g. vfork / posix_spawn). In that case the last thread must
-    /// **not** clear the address space on exit — the co-owner may still be
-    /// running.
+    /// 当此进程与父进程/兄弟进程共享 [`AddrSpace`] 时（`CLONE_VM`，例如
+    /// vfork / posix_spawn），该值为 `true`。这种情况下，最后一个线程退出时
+    /// **不能**清理地址空间——共享者可能仍在运行。
     ///
-    /// `false` for normal `fork()` children and after a successful `execve`
-    /// installs a private address space.
+    /// 对于普通的 `fork()` 子进程以及在 `execve` 成功安装私有地址空间之后，
+    /// 该值为 `false`。
     vm_aspace_shared: AtomicBool,
 
-    /// Set after [`Self::release_aspace_slot_if_needed`] runs so `Drop` does not
-    /// double-decrement [`AddrSpace::process_slots`].
+    /// 在 [`Self::release_aspace_slot_if_needed`] 执行后置位，以防止 `Drop`
+    /// 对 [`AddrSpace::process_slots`] 重复减量。
     aspace_slot_released: AtomicBool,
 
-    /// Job-control state (stop flag + pending parent report) under one lock.
+    /// 作业控制状态（停止标志 + 待向父进程报告），由同一把锁保护。
     job_control: SpinNoIrq<JobControl>,
 
-    /// Woken to release threads parked in a job-control stop. Fired by
-    /// `SIGCONT` (continue) and `SIGKILL` (force-resume so the kill proceeds).
+    /// 被唤醒以释放因作业控制停止而阻塞的线程。由 `SIGCONT`（继续）和
+    /// `SIGKILL`（强制恢复以执行终止）触发。
     cont_event: Arc<PollSet>,
 }
 
