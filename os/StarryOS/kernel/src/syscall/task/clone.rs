@@ -163,11 +163,11 @@ impl CloneArgs {
         let old_proc_data = &curr_thread.proc_data;
 
         let mut new_task = new_user_task(&curr.name(), new_uctx, set_child_tid);
-
         let tid = new_task.id().as_u64() as Pid;
         if flags.contains(CloneFlags::PARENT_SETTID) && parent_tid != 0 {
             (parent_tid as *mut Pid).vm_write(tid).ok();
         }
+
 
         let new_proc_data = if flags.contains(CloneFlags::THREAD) {
             new_task
@@ -227,7 +227,9 @@ impl CloneArgs {
             // 子进程的 dumpable 会重置为 SUID_DUMP_USER (1)，
             // 从而破坏该 prctl 旨在强制实施的安全语义。
             // 已在 Linux 主机上验证：父进程设为 0 后 fork，子进程的 PR_GET_DUMPABLE 返回 0。
+            // 控制的是进程崩溃后是否允许生成 core dump（核心转储）文件。
             proc_data.set_dumpable(old_proc_data.dumpable());
+            // 禁用透明大页
             proc_data.set_thp_disable(old_proc_data.thp_disable());
 
             {
@@ -258,6 +260,7 @@ impl CloneArgs {
 
         new_proc_data.proc.add_thread(tid);
 
+        // cred 是 credentials（凭证）的缩写，记录了**"这个线程是谁"以及"能做什么"**的完整身份信息
         let parent_cred = Some(curr_thread.cred());
         let thr = Thread::new(
             tid,
@@ -293,6 +296,7 @@ impl CloneArgs {
             new_proc_data.set_vfork_done(poll);
         }
 
+        //new task添加到运行队列
         let task = spawn_task(new_task);
         add_task_to_table(&task);
 

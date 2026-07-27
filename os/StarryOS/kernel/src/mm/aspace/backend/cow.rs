@@ -382,6 +382,8 @@ impl BackendOps for CowBackend {
         new_pt: &mut PageTableCursor,
         _new_aspace: &Arc<Mutex<AddrSpace>>,
     ) -> AxResult<Backend> {
+        //将父进程该区域的原始权限 去掉 WRITE 位。如果原始是 RW，那 cow_flags 就是 R（只读）。
+        //这是给 CoW 用的——父子都映射为只读，谁写入谁触发缺页异常来真正拷贝。
         let cow_flags = flags - MappingFlags::WRITE;
 
         for vaddr in pages_in(range, self.size)? {
@@ -393,26 +395,85 @@ impl BackendOps for CowBackend {
                     // - Update its permissions in the old page table using `flags`.
                     // - Map the same physical page into the new page table at the same
                     // virtual address, with the same page size and `flags`.
+                    //已映射 (Ok)：说明父进程有这一页（已分配物理内存），需要 CoW 共享
+                    //在全局 FRAME_TABLE 中查找该物理帧
                     let frame = FRAME_TABLE
                         .lock()
                         .get_frame_ref(paddr)
                         .ok_or(AxError::BadAddress)?;
                     let mut frame = frame.lock();
                     assert!(frame.0 > 0, "referencing unreferenced frame");
+                    //引用计数 +1
+                    //这一页物理内存现在同时被父进程和子进程共享，所以引用计数 +1
                     frame.0 += 1;
                     if frame.0 == u8::MAX {
                         warn!("frame reference count overflow");
                         return Err(AxError::BadAddress);
                     }
+                    //修改父页表 → 去掉写权限
+                    //将父进程页表中这一页的权限改为 cow_flags（即去掉 WRITE 位）。原本 RW 的页现在变成 只读。
+                    // 这就是 CoW 的核心——父进程的页表条目被降级为只读，之后父进程如果写入该页，会触发 page fault，在 handler 中执行真正的拷贝。
+                    //
                     old_pt.protect(vaddr, cow_flags)?;
+                    //建立子页表映射 → 同一物理帧，只读
+                    //将同一物理帧（paddr）映射到子进程页表的同一虚拟地址（vaddr），权限也是只读。子进程如果写入，同样触发 page fault 拷贝。
                     new_pt.map(vaddr, paddr, self.size, cow_flags)?;
+                    //  一页完整流程图示
+  
+                    //以父进程中一页 vaddr=0x1000，已映射到 paddr=0xA000（权限 RW）为例：
+                    //
+                    //clone_map 调用前:
+                    //    FRAME_TABLE: { 0xA000 → refcnt=1 }
+                    //    父进程页表:   0x1000 → 0xA000 (RW)
+                    //    子进程页表:   0x1000 → (空)
+                    //
+                    //clone_map 处理 vaddr=0x1000:
+                    //
+                    //    step 1. old_pt.query(0x1000) → Ok((0xA000, _, 4K))
+                    //    step 2. FRAME_TABLE[0xA000].refcnt: 1 → 2         ← 引用计数 +1
+                    //    step 3. old_pt.protect(0x1000, R)                 ← 父页表去掉 W
+                    //    step 4. new_pt.map(0x1000, 0xA000, 4K, R)        ← 子页表建立映射（R）
+                    //
+                    //clone_map 调用后:
+                    //    FRAME_TABLE: { 0xA000 → refcnt=2 }
+                    //    父进程页表:   0x1000 → 0xA000 (R-)    ← 只读
+                    //    子进程页表:   0x1000 → 0xA000 (R-)    ← 只读，同一物理帧
+
+                    //后续任一进程写入 0x1000 → page fault → handle_cow_fault:
+                    //    - refcnt=2 > 1 → 分配新帧 0xB000，拷贝 0xA000 内容到 0xB000
+                    //    - 写入方页表: 0x1000 → 0xB000 (RW)   ← 获得独占副本
+                    //    - 另一方页表: 0x1000 → 0xA000 (R-)   ← 保持原来的
+                    //    - FRAME_TABLE: 0xA000→1, 0xB000→1
+                    //
+                    //父进程写入触发 fault:
+                    //    frame.0 = 2 (>1)
+                    //    → 分配新帧 0xB000，拷贝内容
+                    //    → 父进程页表: 0x1000 → 0xB000 (RW)  ★ 只改了父进程的
+                    //    → frame.drop_frame(0xA000) → refcnt: 2 → 1
+                    //    → 子进程页表: 0x1000 → 0xA000 (R-)  ← 没人动它
+                    //
+                    //子进程之后写入同一页触发 fault:
+                    //    frame.0 = 1 (=1)  ← 已经独占!
+                    //    → pt.protect(vaddr, flags)  ← 不用拷贝，直接恢复 WRITE 位
+                    //    → 子进程页表: 0x1000 → 0xA000 (RW)  ← 零拷贝升级
+                    //
+                    //为什么这样设计？
+                    //
+                    //1. 没必要提前改对方：另一进程可能永远不写这页（比如立即 exec），提前改回去是浪费
+                    //2. 跨页表修改成本高：你要遍历找到所有引用同一物理帧的进程页表，这在多核、多进程场景下极其昂贵
+                    //3. 第二个来的人占便宜：先写的那个进程承担拷贝成本，后写的那个发现 refcnt=1，直接升级权限，零开销
+                                        
+                    //另一进程可能永远不写这页（比如立即 exec），提前改回去是浪费 这句话不理解，
+                    //如果fork后立即exec填入新的ELF，如果exec也要使用这个页，但是是只读的，会如何处理，还是说此种情况不会发生 
+                    //答案是：exec 根本不会触碰那些旧的 CoW 页——它直接把整个地址空间换掉了
+                    
                 }
                 // If the page is not mapped, skip it.
                 Err(PagingError::NotMapped) => {}
                 Err(_) => return Err(AxError::BadAddress),
             };
         }
-
+        //构造子进程的 Backend
         Ok(Backend::Cow(self.clone()))
     }
 

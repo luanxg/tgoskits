@@ -572,15 +572,14 @@ impl AddrSpace {
         false
     }
 
-    /// Attempts to clone the current address space into a new one.
+    /// 尝试将当前地址空间克隆到一个新的地址空间中。
     ///
-    /// This method creates a new empty address space with the same base and
-    /// size, then iterates over all memory areas in the original address
-    /// space to copy or share their mappings into the new one.
+    /// 此方法首先创建一个具有相同基址和尺寸的新的空地址空间，
+    /// 然后遍历原始地址空间中的所有内存区域，将它们映射复制或共享到新的地址空间中。
     ///
-    /// After each area is mapped, `memfd_on_after_map` runs so each cloned memfd
-    /// shared-writable VMA increments the same counter as [`AddrSpace::map`].
-    /// (`CLONE_VM` shares one address space and does not duplicate VMAs here.)
+    /// 每个区域映射完成后，会调用 `memfd_on_after_map`，确保每个被克隆的
+    /// memfd 共享可写 VMA 都会递增与 [`AddrSpace::map`] 中相同的计数器。
+    /// （`CLONE_VM` 共享同一个地址空间，此处不会复制 VMA。）
     pub fn try_clone(&mut self) -> AxResult<Arc<Mutex<Self>>> {
         let new_aspace = Arc::new(Mutex::new(Self::new_empty(self.base(), self.size())?));
         let new_aspace_clone = new_aspace.clone();
@@ -601,24 +600,29 @@ impl AddrSpace {
             let start = new_area.start();
             {
                 let aspace = guard.deref_mut();
+
+                //对于 CowBackend 
+                //clone_map 阶段:  已做 → new_pt.map(vaddr, paddr, ...) 逐页映射物理帧到子页表
+                //areas.map 阶段:  跳过 → backend.map() 是空操作，不碰页表
+                //执行 → BTreeMap::insert(area)          登记 VMA 描述符到子地址空间
                 aspace.areas.map(new_area, &mut aspace.pt, false)?;
             }
             crate::syscall::memfd_on_after_map(&guard, start);
         }
-        // Seed the child's vm_stat from the parent: the child's address space
-        // is a copy of the parent's, so its current VSS equals the parent's,
-        // and its starting watermarks inherit the parent's peaks (Linux fork
-        // semantics: child mm->hiwater_vm = parent mm->total_vm at fork time).
+        // 从父进程初始化子进程的 vm_stat：子进程的地址空间是父进程的副本，
+        // 因此其当前 VSS（虚拟内存集大小）与父进程相等，
+        // 且其起始水位线继承父进程的峰值（Linux fork 语义：
+        // 子进程的 mm->hiwater_vm = 父进程在 fork 时的 mm->total_vm）。
         guard.vm_stat.seed_from(&self.vm_stat);
         drop(guard);
 
         Ok(new_aspace)
     }
 
-    /// Returns an iterator over the memory areas.
+    /// 返回一个内存区域的迭代器。
     ///
-    /// This is required for `procfs` to generate `/proc/pid/maps`.
-    /// Exposing internal state for system introspection is a standard practice.
+    /// 这是 `procfs` 生成 `/proc/pid/maps` 所必需的。
+    /// 将内部状态暴露给系统自省（introspection）是业界的标准做法。
     pub fn areas(&self) -> impl Iterator<Item = &MemoryArea<Backend>> {
         self.areas.iter()
     }
