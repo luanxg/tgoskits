@@ -80,100 +80,95 @@ impl NextSignalCheckBlock {
     }
 }
 
-/// The inner data of a thread.
+/// 线程的内部数据。
 pub struct Thread {
-    /// User-visible thread ID (the `Pid` returned by `gettid`).
+    /// 用户可见的线程 ID（即 `gettid` 返回的 `Pid`）。
     ///
-    /// Initially equal to the underlying scheduler `TaskInner::id()`. The two
-    /// diverge after a successful non-leader `execve`: Linux's `de_thread`
-    /// step transfers the leader's TID/TGID to the calling thread so that
-    /// `gettid() == getpid()` holds in the new image. We model that by
-    /// updating this field while leaving the immutable scheduler ID alone.
-    /// All user-facing TID lookups (`sys_gettid`, `set_tid_address`, signal
-    /// child registration, `do_exit`'s thread-group bookkeeping, etc.) read
-    /// this rather than the scheduler ID.
+    /// 初始值与底层调度器的 `TaskInner::id()` 相同。在非 leader 线程成功
+    /// 执行 `execve` 之后，二者会产生分歧：Linux 的 `de_thread` 步骤会将
+    /// leader 的 TID/TGID 转移给调用线程，从而在新镜像中满足
+    /// `gettid() == getpid()`。我们通过更新此字段来建模这一行为，同时
+    /// 保持不可变的调度器 ID 不变。所有面向用户的 TID 查询（`sys_gettid`、
+    /// `set_tid_address`、信号子进程注册、`do_exit` 的线程组簿记等）都
+    /// 读取此字段而非调度器 ID。
     tid: AtomicU32,
 
-    /// The process data shared by all threads in the process.
+    /// 进程中所有线程共享的进程数据。
     pub proc_data: Arc<ProcessData>,
 
-    /// The clear thread tid field
+    /// clear_child_tid 字段
     ///
-    /// See <https://manpages.debian.org/unstable/manpages-dev/set_tid_address.2.en.html#clear_child_tid>
+    /// 参见 <https://manpages.debian.org/unstable/manpages-dev/set_tid_address.2.en.html#clear_child_tid>
     ///
-    /// When the thread exits, the kernel clears the word at this address if it
-    /// is not NULL.
+    /// 当线程退出时，如果此地址不为 NULL，内核会将该地址处的字清零。
     clear_child_tid: AtomicUsize,
 
-    /// The head of the robust list
+    /// robust 链表头
     robust_list_head: AtomicUsize,
 
-    /// The thread-level signal manager
+    /// 线程级信号管理器
     pub signal: Arc<ThreadSignalManager>,
 
-    /// Time manager
+    /// 时间管理器
     ///
-    /// This is assumed to be `Sync` because it's only borrowed mutably during
-    /// context switches, which is exclusive to the current thread.
+    /// 假定其为 `Sync`，因为它仅在上下文切换期间被可变借用，而上下文切换
+    /// 是当前线程独占的。
     pub time: AssumeSync<RefCell<TimeManager>>,
 
-    /// The OOM score adjustment value.
+    /// OOM 分数调整值。
     oom_score_adj: AtomicI32,
 
-    /// Ready to exit
+    /// 准备退出
     pub exit: Arc<AtomicBool>,
 
-    /// Indicates whether the thread is currently accessing user memory.
+    /// 表示线程当前是否正在访问用户内存。
     accessing_user_memory: AtomicBool,
 
-    /// Skips one signal check after returning from a user-space signal handler.
+    /// 从用户空间信号处理函数返回后，跳过一次信号检查。
     block_next_signal_check: NextSignalCheckBlock,
 
-    /// Self exit event
+    /// 自身退出事件
     pub exit_event: Arc<PollSet>,
 
-    /// Set by `sys_execve` when reaping sibling threads. The signal-check
-    /// path turns this into a thread-only `do_exit(0, false)` — no group
-    /// exit, no fatal-signal cascade — so the new image is left intact.
+    /// 由 `sys_execve` 在回收兄弟线程时设置。信号检查路径会将其转换为
+    /// 仅针对当前线程的 `do_exit(0, false)`——不触发组退出，不产生致命
+    /// 信号级联——从而保持新镜像完整无损。
     exit_request: AtomicBool,
 
-    /// The registered rseq area pointer (user address) for restartable
-    /// sequences (`rseq(2)`).
+    /// 为可重启序列（`rseq(2)`）注册的 rseq 区域指针（用户地址）。
     rseq_area: AtomicUsize,
 
-    /// The rseq signature recorded at registration time.
+    /// 注册时记录的 rseq 签名。
     rseq_signature: AtomicU32,
 
-    /// The signal to send to this thread when its parent dies (PR_SET_PDEATHSIG).
+    /// 当父进程终止时，向该线程发送的信号（PR_SET_PDEATHSIG）。
     pdeathsig: AtomicU32,
 
-    /// PR_SET_NO_NEW_PRIVS: once set, cannot be unset.
+    /// PR_SET_NO_NEW_PRIVS：一旦设置，不可撤销。
     no_new_privs: AtomicBool,
 
-    /// seccomp syscall filtering state.
+    /// seccomp 系统调用过滤状态。
     seccomp: SpinNoIrq<SeccompState>,
 
-    /// Process credentials (uid, gid, etc.).
+    /// 进程凭证（uid、gid 等）。
     cred: SpinNoIrq<Arc<Cred>>,
 
-    /// Signo (as u8) of the synchronous user-mode fault that
-    /// [`raise_signal_fatal`] last force-delivered to this thread, or 0
-    /// for "no fault dump owed". [`check_signals`] only emits the
-    /// register dump when the signal it is about to terminate on
-    /// matches this signo — otherwise a low-numbered pending signal
-    /// (e.g. an external SIGTERM that landed before the SIGSEGV from a
-    /// page fault) would consume the flag and either dump for the
-    /// wrong context or, if it had a user handler, swallow the dump so
-    /// the real fault terminated silently.
+    /// [`raise_signal_fatal`] 最近强制投递给该线程的同步用户态故障的
+    /// 信号编号（以 u8 表示），若为 0 则表示"没有待输出的故障转储"。
+    /// [`check_signals`] 仅在即将终止当前线程的信号与此 signo 匹配时，
+    /// 才会输出寄存器转储——否则，一个低编号的挂起信号（例如在缺页异常
+    /// 产生 SIGSEGV 之前到达的外部 SIGTERM）可能会消费掉该标志，导致
+    /// 要么在错误的上下文中输出转储，要么（如果该信号有用户态处理函数）
+    /// 吞噬掉转储，使得真正的故障静默终止。
     pub fault_dump_signo: AtomicU8,
 
-    /// Whether uid_map has been written for this thread's user namespace.
+    /// 是否已为该线程的用户命名空间写入了 uid_map。
     uid_map_written: AtomicBool,
 
-    /// Whether gid_map has been written for this thread's user namespace.
+    /// 是否已为该线程的用户命名空间写入了 gid_map。
     gid_map_written: AtomicBool,
 
-    /// Whether setgroups has been set to "deny" for this thread's user namespace.
+    /// 是否已将该线程的用户命名空间的 setgroups 设置为 "deny"。
     setgroups_deny: AtomicBool,
 }
 
