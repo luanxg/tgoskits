@@ -8,18 +8,17 @@ use core::{mem::MaybeUninit, slice};
 use ax_errno::AxError;
 use extern_trait::extern_trait;
 
-/// Errors that can occur during virtual memory operations.
+/// 虚拟内存操作可能产生的错误。
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum VmError {
-    /// The address is invalid, e.g., not aligned to the required boundary,
-    /// out of bounds (including null).
+    /// 地址无效，例如未对齐到要求的边界、越界（包括空指针）。
     BadAddress,
-    /// The operation is not allowed, e.g., trying to write to read-only memory.
+    /// 操作不被允许，例如尝试写入只读内存。
     AccessDenied,
-    /// The C-style string or array is too long.
+    /// C 风格字符串或数组过长。
     ///
-    /// This error is returned by [`vm_load_until_nul`] when the null terminator
-    /// is not found within a predefined search limit.
+    /// 当在预定义的搜索限制内未找到空终止符时，
+    /// [`vm_load_until_nul`] 会返回此错误。
     #[cfg(feature = "alloc")]
     TooLong,
 }
@@ -34,54 +33,50 @@ impl From<VmError> for AxError {
     }
 }
 
-/// A result type for virtual memory operations.
+/// 虚拟内存操作的结果类型。
 pub type VmResult<T = ()> = Result<T, VmError>;
 
-/// The interface for accessing virtual memory.
+/// 访问虚拟内存的接口。
 ///
-/// # Safety
+/// # 安全性
 ///
-/// - The implementation must ensure that the memory accesses are safe and do
-///   not violate any memory safety rules.
+/// - 实现者必须确保内存访问是安全的，且不违反任何内存安全规则。
 #[extern_trait(VmImpl)]
 pub unsafe trait VmIo {
-    /// Creates an instance of [`VmIo`].
+    /// 创建一个 [`VmIo`] 实例。
     ///
-    /// This is used for implementations which might need to store some state or
-    /// data to perform the operations. Implementators may leave this empty
-    /// if no state is needed.
+    /// 用于那些可能需要存储一些状态或数据才能执行操作的实现。
+    /// 如果不需要任何状态，实现者可以将其留空。
     fn new() -> Self;
 
-    /// Reads data from the virtual memory starting at `start` into `buf`.
+    /// 从虚拟内存中 `start` 处开始读取数据到 `buf` 中。
     fn read(&mut self, start: usize, buf: &mut [MaybeUninit<u8>]) -> VmResult;
 
-    /// Writes data to the virtual memory starting at `start` from `buf`.
+    /// 将 `buf` 中的数据写入到虚拟内存中 `start` 处。
     fn write(&mut self, start: usize, buf: &[u8]) -> VmResult;
 }
 
-/// Reads a slice from the virtual memory.
+/// 从虚拟内存中读取一个切片。
 ///
-/// The user pointer need NOT be aligned to `align_of::<T>()`. The underlying
-/// `user_copy` is byte-granular on every arch (x86 `rep movsb`;
-/// aarch64/riscv64/ loongarch64 byte-align the destination first, then
-/// bulk-copy) — exactly like Linux `copy_from_user`, which never requires
-/// user-buffer alignment. The old `is_aligned()` gate wrongly rejected valid
-/// unaligned user buffers.
+/// 用户指针无需对齐到 `align_of::<T>()`。底层的 `user_copy` 在所有架构上
+/// 都是字节粒度的（x86 使用 `rep movsb`；aarch64/riscv64/loongarch64 先将
+/// 目标地址字节对齐，再进行批量拷贝）——与 Linux `copy_from_user` 完全一致，
+/// 后者从不要求用户缓冲区对齐。旧的 `is_aligned()` 检查会错误地拒绝有效的
+/// 非对齐用户缓冲区。
 pub fn vm_read_slice<T>(ptr: *const T, buf: &mut [MaybeUninit<T>]) -> VmResult {
     VmImpl::new().read(ptr.addr(), buf.as_bytes_mut())
 }
 
-/// Writes data to the virtual memory.
+/// 将数据写入虚拟内存。
 ///
-/// No pointer-alignment requirement (Linux-parity: `copy_to_user` is
-/// alignment-agnostic; see [`vm_read_slice`]). The old `is_aligned()` gate made
-/// `epoll_pwait` return EFAULT on riscv64/loongarch64: Go's `[]epollevent` is
-/// 4-byte-aligned (`data [8]byte`) while `struct epoll_event` is 8-aligned
-/// (`u64 data`) on non-x86, so the events buffer failed the check and crashed
-/// the Go netpoller (`netpoll failed`).
+/// 无指针对齐要求（与 Linux 保持一致：`copy_to_user` 不关心对齐；
+/// 参见 [`vm_read_slice`]）。旧的 `is_aligned()` 检查曾导致 `epoll_pwait`
+/// 在 riscv64/loongarch64 上返回 EFAULT：Go 的 `[]epollevent` 是 4 字节
+/// 对齐的（`data [8]byte`），而 `struct epoll_event` 在非 x86 架构上是
+/// 8 字节对齐的（`u64 data`），因此事件缓冲区无法通过对齐检查，
+/// 导致 Go 网络轮询器崩溃（`netpoll failed`）。
 pub fn vm_write_slice<T>(ptr: *mut T, buf: &[T]) -> VmResult {
-    // SAFETY: we don't care about validity, since these bytes are only used for
-    // writing to the virtual memory.
+    // 安全性：我们不关心数据的有效性，因为这些字节仅用于写入虚拟内存。
     let bytes = unsafe { slice::from_raw_parts(buf.as_ptr().cast::<u8>(), size_of_val(buf)) };
     VmImpl::new().write(ptr.addr(), bytes)
 }

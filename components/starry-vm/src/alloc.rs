@@ -6,24 +6,23 @@ use bytemuck::{AnyBitPattern, Pod, bytes_of, zeroed};
 
 use crate::{VmError, VmImpl, VmIo, VmResult, vm_read_slice};
 
-/// Loads a vector of elements from the virtual memory.
+/// 从虚拟内存中加载一个元素向量。
 ///
-/// # Safety
+/// # 安全性
 ///
-/// The caller must ensure the memory pointed to by `ptr` is valid and
-/// initialized.
+/// 调用者必须确保 `ptr` 指向的内存是有效且已初始化的。
 pub unsafe fn vm_load_any<T>(ptr: *const T, len: usize) -> VmResult<Vec<T>> {
     let mut buf = Vec::with_capacity(len);
     vm_read_slice(ptr, &mut buf.spare_capacity_mut()[..len])?;
-    // SAFETY: The caller guarantees that the memory is valid and initialized.
+    // 安全性：调用者保证内存是有效且已初始化的。
     unsafe { buf.set_len(len) }
     Ok(buf)
 }
 
-/// Loads a vector of elements from the virtual memory.
+/// 从虚拟内存中加载一个元素向量。
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn vm_load<T: AnyBitPattern>(ptr: *const T, len: usize) -> VmResult<Vec<T>> {
-    // SAFETY: `AnyBitPattern`
+    // 安全性：`AnyBitPattern` 约束保证了任意位模式都是有效的。
     unsafe { vm_load_any(ptr, len) }
 }
 
@@ -34,7 +33,7 @@ fn is_zero<T: Pod>(value: &T) -> bool {
 
 const MAX_BYTES: usize = 131072;
 
-/// Loads elements from the given pointer until a zero element is found.
+/// 从给定指针加载元素，直到遇到零元素为止。
 pub fn vm_load_until_nul<T: Pod>(ptr: *const T) -> VmResult<Vec<T>> {
     if !ptr.is_aligned() {
         return Err(VmError::BadAddress);

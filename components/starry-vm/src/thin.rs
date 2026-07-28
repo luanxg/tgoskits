@@ -4,15 +4,15 @@ use bytemuck::AnyBitPattern;
 
 use crate::{VmResult, vm_read_slice, vm_write_slice};
 
-/// A virtual memory pointer.
+/// 虚拟内存指针。
 pub trait VmPtr: Copy {
-    /// The type of data that the pointer points to.
+    /// 该指针所指向的数据类型。
     type Target;
 
     #[doc(hidden)]
     fn as_ptr(self) -> *const Self::Target;
 
-    /// Returns `None` if the pointer is null, otherwise returns `Some(self)`.
+    /// 如果指针为空则返回 `None`，否则返回 `Some(self)`。
     fn nullable(self) -> Option<Self> {
         if self.as_ptr().is_null() {
             None
@@ -21,16 +21,15 @@ pub trait VmPtr: Copy {
         }
     }
 
-    /// Reads the value from this virtual memory pointer. In contrast to
-    /// [`VmPtr::vm_read`], this does not require that the value has to be
-    /// initialized.
+    /// 从此虚拟内存指针读取值。与 [`VmPtr::vm_read`] 不同，
+    /// 此方法不要求值必须已初始化。
     fn vm_read_uninit(self) -> VmResult<MaybeUninit<Self::Target>> {
         let mut uninit = MaybeUninit::<Self::Target>::uninit();
         vm_read_slice(self.as_ptr(), slice::from_mut(&mut uninit))?;
         Ok(uninit)
     }
 
-    /// Reads the value from this virtual memory pointer.
+    /// 从此虚拟内存指针读取值。
     fn vm_read(self) -> VmResult<Self::Target>
     where
         Self::Target: AnyBitPattern,
@@ -65,9 +64,9 @@ impl<T> VmPtr for NonNull<T> {
     }
 }
 
-/// A mutable virtual memory pointer.
+/// 可变虚拟内存指针。
 pub trait VmMutPtr: VmPtr {
-    /// Overwrites a virtual memory location with the given value.
+    /// 用给定的值覆盖虚拟内存中的某个位置。
     fn vm_write(self, value: Self::Target) -> VmResult {
         vm_write_slice(self.as_ptr().cast_mut(), slice::from_ref(&value))
     }

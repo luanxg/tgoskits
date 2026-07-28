@@ -370,6 +370,7 @@ fn handle_page_fault(vaddr: VirtAddr, access_flags: MappingFlags) -> bool {
 
 pub fn vm_load_string(ptr: *const c_char) -> AxResult<String> {
     #[allow(clippy::unnecessary_cast)]
+    //从用户空间内存中读取一个以 \0（null 字节）结尾的字节序列，直到遇到 \0 为止，返回 Vec<u8>。
     let bytes = vm_load_until_nul(ptr as *const u8)?;
     String::from_utf8(bytes).map_err(|_| AxError::IllegalBytes)
 }
