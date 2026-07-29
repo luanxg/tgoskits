@@ -41,6 +41,7 @@ pub type VmResult<T = ()> = Result<T, VmError>;
 /// # 安全性
 ///
 /// - 实现者必须确保内存访问是安全的，且不违反任何内存安全规则。
+/// #[extern_trait(VmImpl)]是因为具体实现的VmIo trait的类型不在不当前的crate中
 #[extern_trait(VmImpl)]
 pub unsafe trait VmIo {
     /// 创建一个 [`VmIo`] 实例。
@@ -50,9 +51,11 @@ pub unsafe trait VmIo {
     fn new() -> Self;
 
     /// 从虚拟内存中 `start` 处开始读取数据到 `buf` 中。
+    /// 模拟cory_from_user函数
     fn read(&mut self, start: usize, buf: &mut [MaybeUninit<u8>]) -> VmResult;
 
     /// 将 `buf` 中的数据写入到虚拟内存中 `start` 处。
+    /// 模拟copy_to_user
     fn write(&mut self, start: usize, buf: &[u8]) -> VmResult;
 }
 
