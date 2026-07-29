@@ -81,7 +81,13 @@ fn mount_at(fs: &FsContext, path: &str, mount_fs: Filesystem) -> LinuxResult<()>
 pub fn mount_all() -> LinuxResult<()> {
     info!("Initialize pseudofs...");
 
-    let fs = current().as_thread().proc_data.fs_context.lock();
+    // Use ROOT_FS_CONTEXT directly: mount_all runs before any process
+    // is created, so current().as_thread() would panic.
+    let root_fs = ax_fs_ng::vfs::ROOT_FS_CONTEXT
+        .get()
+        .expect("Root FS context not initialized");
+    // mount_all is called during init, single-threaded — no lock needed.
+    let fs = &*root_fs;
     mount_at(&fs, "/dev", dev::new_devfs())?;
 
     let (shm_fs, shm_handle) = tmp::MemoryFs::new_with_handle();

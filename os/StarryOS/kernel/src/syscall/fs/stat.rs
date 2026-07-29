@@ -5,7 +5,6 @@ use core::{
 
 use ax_errno::{AxError, AxResult, LinuxError};
 use ax_task::current;
-use ax_task::current;
 use axfs_ng_vfs::{Location, NodePermission};
 use linux_raw_sys::general::{
     __kernel_fsid_t, AT_EACCESS, AT_EMPTY_PATH, AT_NO_AUTOMOUNT, AT_STATX_SYNC_TYPE,

@@ -7,12 +7,15 @@ use ax_fs_ng::vfs::ROOT_FS_CONTEXT;
 use ax_runtime::hal::cpu::uspace::UserContext;
 use ax_sync::Mutex;
 use ax_task::{AxTaskExt, spawn_task};
+use flatten_objects::FlattenObjects;
+use spin::RwLock;
 use starry_process::{Pid, Process};
 
 use crate::{
+    file::FileDescriptor,
     mm::{copy_from_kernel, load_user_app, new_user_aspace_empty},
     pseudofs::{self, dev::tty::N_TTY},
-    task::{ProcessData, ProcessImage, Thread, add_task_to_table, new_user_task, spawn_alarm_task},
+    task::{AX_FILE_LIMIT, ProcessData, ProcessImage, Thread, add_task_to_table, new_user_task, spawn_alarm_task},
 };
 
 /// Initialize and run initproc.
@@ -26,14 +29,25 @@ pub fn init(args: &[String], envs: &[String]) {
     //暂时也可以不需要
     ax_alloc::register_page_reclaim_fn(ax_fs_ng::vfs::page_cache_reclaim);
 
-    let loc = proc.fs_context
-        .lock()
+    let root_fs = ROOT_FS_CONTEXT
+        .get()
+        .expect("Root FS context not initialized");
+    let loc = root_fs
         .resolve(&args[0])
         .expect("Failed to resolve executable path");
     let path = loc
         .absolute_path()
         .expect("Failed to get executable absolute path");
     let name = loc.name().into_owned();
+
+    // Create the init process's fs_context early — load_user_app
+    // may need to resolve dynamic linker or shebang paths.
+    let fs_context = Arc::new(Mutex::new(
+        ROOT_FS_CONTEXT
+            .get()
+            .expect("Root FS context not initialized")
+            .clone(),
+    ));
 
     let mut uspace = new_user_aspace_empty()
         .and_then(|mut it| {
@@ -42,7 +56,7 @@ pub fn init(args: &[String], envs: &[String]) {
         })
         .expect("Failed to create user address space");
 
-    let (entry_vaddr, ustack_top, auxv) = load_user_app(&mut uspace, loc, &args[0], args, envs)
+    let (entry_vaddr, ustack_top, auxv) = load_user_app(&mut uspace, loc, &args[0], args, envs, &fs_context)
         .unwrap_or_else(|e| panic!("Failed to load user app: {}", e));
 
     let uctx = UserContext::new(entry_vaddr.into(), ustack_top, 0);
@@ -64,13 +78,7 @@ pub fn init(args: &[String], envs: &[String]) {
 
     N_TTY.bind_to(&proc).expect("Failed to bind ntty");
 
-    let fs_context = Arc::new(Mutex::new(
-        ROOT_FS_CONTEXT
-            .get()
-            .expect("Root FS context not initialized")
-            .clone(),
-    ));
-    let fd_table = Arc::default();
+    let fd_table: Arc<RwLock<FlattenObjects<FileDescriptor, AX_FILE_LIMIT>>> = Arc::default();
 
     let proc = ProcessData::new(
         proc,
@@ -80,16 +88,16 @@ pub fn init(args: &[String], envs: &[String]) {
         None,
         pid,
         false,
-        fs_context,
+        fs_context.clone(),
         fd_table.clone(),
     );
 
     {
-        crate::file::add_stdio(&mut fd_table.write())
+        crate::file::add_stdio(&mut fd_table.write(), &fs_context)
             .expect("Failed to add stdio");
     }
 
-    let thr = Thread::new(pid, proc, None, starry_signal::SignalSet::default());
+    let thr = Thread::new(pid, proc.clone(), None, starry_signal::SignalSet::default());
     *task.task_ext_mut() = Some(AxTaskExt::from_impl(thr));
 
     let task = spawn_task(task);

@@ -64,7 +64,8 @@ pub fn sys_memfd_create(name: *const c_char, flags: u32) -> AxResult<isize> {
     };
     let tmpfs = tmpfs.ok_or(AxError::NotFound)?;
 
-    let fs = current().as_thread().proc_data.fs_context.lock();
+    let curr = current(); let proc_data = &curr.as_thread().proc_data;
+    let fs = proc_data.fs_context.lock();
     let mountpoint = fs.resolve(mount_path)?.mountpoint().clone();
     let cred = current().as_thread().cred();
     let entry = tmpfs.create_anonymous_file(

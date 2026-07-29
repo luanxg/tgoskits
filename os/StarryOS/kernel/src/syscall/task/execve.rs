@@ -182,7 +182,7 @@ fn do_execve(
     let mut new_aspace = new_user_aspace_empty()?;
     copy_from_kernel(&mut new_aspace)?;
     let (entry_point, user_stack_base, auxv) =
-        match load_user_app(&mut new_aspace, loc, &path, &args, &envs) {
+        match load_user_app(&mut new_aspace, loc, &path, &args, &envs, &curr.as_thread().proc_data.fs_context) {
             Ok(result) => result,
             Err(AxError::InvalidExecutable) => {
                 // ENOEXEC fallback: retry via /bin/sh.
@@ -190,13 +190,13 @@ fn do_execve(
                 // not by the kernel. This is a pragmatic workaround until
                 // musl's execvp or busybox's ENOEXEC handling is available.
                 let shell_path = "/bin/sh";
-                let shell_loc = current().as_thread().proc_data.fs_context.lock().resolve(shell_path)?;
+                let shell_loc = curr.as_thread().proc_data.fs_context.lock().resolve(shell_path)?;
                 new_name = shell_loc.name().to_string();
                 new_exe_path = shell_loc.absolute_path()?.to_string();
                 args = iter::once(String::from(shell_path))
                     .chain(args.iter().cloned())
                     .collect();
-                load_user_app(&mut new_aspace, shell_loc, shell_path, &args, &envs)?
+                load_user_app(&mut new_aspace, shell_loc, shell_path, &args, &envs, &curr.as_thread().proc_data.fs_context)?
             }
             Err(e) => return Err(e),
         };

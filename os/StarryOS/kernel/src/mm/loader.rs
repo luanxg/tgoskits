@@ -4,7 +4,7 @@ use alloc::{borrow::ToOwned, collections::VecDeque, string::String, vec, vec::Ve
 use core::{ffi::CStr, iter, mem::size_of};
 
 use ax_errno::{AxError, AxResult};
-use ax_fs_ng::vfs::{CachedFile, FileBackend};
+use ax_fs_ng::vfs::{CachedFile, FileBackend, FsContext};
 use ax_memory_addr::{MemoryAddr, PAGE_SIZE_4K, VirtAddr};
 use ax_runtime::hal::{
     mem::virt_to_phys,
@@ -592,7 +592,7 @@ impl ElfLoader {
         Self(LRUCache::new())
     }
 
-    fn load(&mut self, uspace: &mut AddrSpace, loc: Location) -> AxResult<LoadResult> {
+    fn load(&mut self, uspace: &mut AddrSpace, loc: Location, fs_ctx: &Mutex<FsContext>) -> AxResult<LoadResult> {
         if !self.0.touch(|e| e.borrow_cache().location().ptr_eq(&loc)) {
             match ElfCacheEntry::load(loc)? {
                 Ok(e) => {
@@ -630,7 +630,7 @@ impl ElfLoader {
         };
 
         let (elf, ldso) = if let Some(ldso) = ldso {
-            let loc = current().as_thread().proc_data.fs_context.lock().resolve(ldso)?;
+            let loc = fs_ctx.lock().resolve(ldso)?;
             if !self.0.touch(|e| e.borrow_cache().location().ptr_eq(&loc)) {
                 let e = ElfCacheEntry::load(loc)?.map_err(|_| AxError::InvalidInput)?;
                 self.0.insert(e);
@@ -723,6 +723,7 @@ pub fn load_user_app(
     path: &str,
     args: &[String],
     envs: &[String],
+    fs_ctx: &Mutex<FsContext>,
 ) -> AxResult<(VirtAddr, VirtAddr, Vec<AuxEntry>)> {
     // `/proc/self/exe` is available in procfs; busybox can `readlink` it
     // to re-exec itself as a shell on ENOEXEC, provided the busybox build
@@ -731,11 +732,11 @@ pub fn load_user_app(
         let new_args: Vec<String> = iter::once("/bin/sh".to_owned())
             .chain(args.iter().cloned())
             .collect();
-        let sh = current().as_thread().proc_data.fs_context.lock().resolve("/bin/sh")?;
-        return load_user_app(uspace, sh, "/bin/sh", &new_args, envs);
+        let sh = fs_ctx.lock().resolve("/bin/sh")?;
+        return load_user_app(uspace, sh, "/bin/sh", &new_args, envs, fs_ctx);
     }
 
-    let (entry, auxv) = match { ELF_LOADER.lock().load(uspace, loc)? } {
+    let (entry, auxv) = match { ELF_LOADER.lock().load(uspace, loc, fs_ctx)? } {
         Ok((entry, auxv)) => (entry, auxv),
         Err(data) => {
             if data.starts_with(b"#!") {
@@ -752,8 +753,8 @@ pub fn load_user_app(
                     .collect();
                 // Open the interpreter by path (Linux's `open_exec` on the
                 // shebang interpreter) and load it as the new executable.
-                let interp = current().as_thread().proc_data.fs_context.lock().resolve(&new_args[0])?;
-                return load_user_app(uspace, interp, &new_args[0], &new_args, envs);
+                let interp = fs_ctx.lock().resolve(&new_args[0])?;
+                return load_user_app(uspace, interp, &new_args[0], &new_args, envs, fs_ctx);
             }
             return Err(AxError::InvalidExecutable);
         }

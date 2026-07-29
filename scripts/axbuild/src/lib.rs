@@ -104,7 +104,9 @@ async fn run_root_cli(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
         Commands::Test => test::std::run_std_test_command(),
         Commands::Clippy(args) => {
-            ensure_aic8800_firmware().await?;
+            if let Err(e) = ensure_aic8800_firmware().await {
+                log::warn!("AIC8800 firmware unavailable, skipping: {e}");
+            }
             clippy::run_workspace_clippy_command(&args)
         }
         Commands::SyncLint(args) => sync_lint::run_sync_lint_command(&args),
@@ -116,7 +118,9 @@ async fn run_root_cli(cli: Cli) -> anyhow::Result<()> {
         Commands::Axloader { command } => Axloader::new()?.execute(command).await,
         Commands::Arceos { command } => ArceOS::new()?.execute(command).await,
         Commands::Starry { command } => {
-            ensure_aic8800_firmware().await?;
+            if let Err(e) = ensure_aic8800_firmware().await {
+                log::warn!("AIC8800 firmware unavailable, skipping: {e}");
+            }
             Starry::new()?.execute(command).await
         }
     }

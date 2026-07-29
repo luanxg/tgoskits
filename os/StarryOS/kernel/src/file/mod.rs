@@ -15,11 +15,12 @@ pub mod signalfd;
 pub mod timerfd;
 mod wext;
 
-use alloc::{borrow::Cow, sync::Arc};
+use alloc::{borrow::Cow, boxed::Box, sync::Arc};
 use core::{ffi::c_int, time::Duration};
 
 use ax_errno::{AxError, AxResult};
-use ax_fs_ng::vfs::{FileBackend, FileFlags, OpenOptions};
+use ax_fs_ng::vfs::{FileBackend, FileFlags, FsContext, OpenOptions};
+use ax_sync::Mutex;
 use ax_io::prelude::*;
 use ax_task::current;
 use axfs_ng_vfs::DeviceId;
@@ -262,14 +263,20 @@ pub struct FileDescriptor {
 
 /// Get the current process's fd table, holding the outer read lock to prevent
 /// table replacement by `close_range(UNSHARE)`.
+///
+/// The returned guard borrows from the current process's `fd_table` and must be
+/// held as long as the inner table is in use. For multi-statement usage, bind
+/// the guard to a local variable before calling `.read()` or `.write()` on it.
 #[inline]
-fn current_fd_table() -> spin::RwLockReadGuard<'static, Arc<RwLock<FlattenObjects<FileDescriptor, AX_FILE_LIMIT>>>> {
-    // SAFETY: The returned guard prevents the outer RwLock from being written.
-    // The Arc inside stays valid as long as the process exists. The 'static
-    // lifetime is sound because ProcessData outlives any stack frame on the
-    // current thread.
-    let guard = current().as_thread().proc_data.fd_table.read();
-    unsafe { core::mem::transmute(guard) }
+pub fn current_fd_table(
+) -> spin::RwLockReadGuard<'static, Arc<RwLock<FlattenObjects<FileDescriptor, AX_FILE_LIMIT>>>> {
+    // Leak a CurrentTask to get a 'static borrow of the fd_table RwLock.
+    // This is safe because ProcessData lives as long as the process, and the
+    // outer guard prevents replacement via close_range(UNSHARE).
+    // The memory cost is one CurrentTask per call (~small), bounded by the
+    // rate of syscalls that manipulate file descriptors.
+    let curr = Box::leak(Box::new(current()));
+    curr.as_thread().proc_data.fd_table.read()
 }
 
 /// Get a file-like object by `fd`.
@@ -296,7 +303,8 @@ pub fn fd_is_path(fd: c_int) -> bool {
 /// Add a file to the file descriptor table.
 pub fn add_file_like(f: Arc<dyn FileLike>, cloexec: bool) -> AxResult<c_int> {
     let max_nofile = current().as_thread().proc_data.rlim.read()[RLIMIT_NOFILE].current;
-    let mut table = current_fd_table().write();
+    let fd_guard = current_fd_table();
+    let mut table = fd_guard.write();
     if table.count() as u64 >= max_nofile {
         return Err(AxError::TooManyOpenFiles);
     }
@@ -365,7 +373,8 @@ pub fn close_all_fds() {
     //   until we release, so strong_count cannot change during our check.
     // - If clone holds the read lock first, we block on write lock, and by the
     //   time we proceed strong_count already reflects the clone.
-    let mut table = current_fd_table().write();
+    let fd_guard = current_fd_table();
+    let mut table = fd_guard.write();
 
     // CLONE_FILES may share the same fd table across multiple tasks/processes.
     // In that case, an exiting sharer must not clear the whole table, or other
@@ -407,9 +416,12 @@ pub fn close_all_fds() {
     }
 }
 
-pub fn add_stdio(fd_table: &mut FlattenObjects<FileDescriptor, AX_FILE_LIMIT>) -> AxResult<()> {
+pub fn add_stdio(
+    fd_table: &mut FlattenObjects<FileDescriptor, AX_FILE_LIMIT>,
+    fs_ctx: &Mutex<FsContext>,
+) -> AxResult<()> {
     assert_eq!(fd_table.count(), 0);
-    let cx = current().as_thread().proc_data.fs_context.lock();
+    let cx = fs_ctx.lock();
     let open = |options: &mut OpenOptions, flags| {
         AxResult::Ok(Arc::new(File::new(
             options.open(&cx, "/dev/console")?.into_file()?,

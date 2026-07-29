@@ -41,7 +41,7 @@ pub use self::{
 };
 
 use crate::{
-    file::{AX_FILE_LIMIT, FileDescriptor},
+    file::FileDescriptor,
     mm::AddrSpace,
 };
 

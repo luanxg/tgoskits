@@ -330,7 +330,7 @@ pub fn sys_close_range(first: i32, last: i32, flags: u32) -> AxResult<isize> {
     }
 
     let cloexec = flags.contains(CloseRangeFlags::CLOEXEC);
-    let mut fd_table = current_fd_table().write();
+    let fd_guard = current_fd_table(); let mut fd_table = fd_guard.write();
     if let Some(max_index) = fd_table.ids().next_back() {
         for fd in first..=last.min(max_index as i32) {
             if cloexec {
@@ -358,7 +358,7 @@ fn dup_fd_min(old_fd: c_int, min_fd: c_int, cloexec: bool) -> AxResult<isize> {
     }
     let f = get_file_like(old_fd)?;
     let max_nofile = current().as_thread().proc_data.rlim.read()[RLIMIT_NOFILE].current as i32;
-    let mut fd_table = current_fd_table().write();
+    let fd_guard = current_fd_table(); let mut fd_table = fd_guard.write();
     for candidate in min_fd..max_nofile {
         let entry = FileDescriptor {
             inner: f.clone(),
@@ -400,7 +400,7 @@ pub fn sys_dup3(old_fd: c_int, new_fd: c_int, flags: c_int) -> AxResult<isize> {
         return Err(AxError::InvalidInput);
     }
 
-    let mut fd_table = current_fd_table().write();
+    let fd_guard = current_fd_table(); let mut fd_table = fd_guard.write();
     let mut f = fd_table
         .get(old_fd as _)
         .cloned()

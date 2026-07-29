@@ -27,7 +27,8 @@ use crate::{
 const DFS_IOCTL_ATOMIC_WRITE_SET: u32 = 0x4004_9502;
 
 pub fn with_fs<R>(dirfd: c_int, f: impl FnOnce(&mut FsContext) -> AxResult<R>) -> AxResult<R> {
-    let mut fs = current().as_thread().proc_data.fs_context.lock();
+    let curr = current(); let proc_data = &curr.as_thread().proc_data;
+    let mut fs = proc_data.fs_context.lock();
     if dirfd == AT_FDCWD {
         f(&mut fs)
     } else {

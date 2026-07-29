@@ -87,7 +87,8 @@ pub fn sys_chdir(path: *const c_char) -> AxResult<isize> {
     let path = vm_load_string(path)?;
     debug_fn!("sys_chdir <= path: {path}");
 
-    let mut fs = current().as_thread().proc_data.fs_context.lock();
+    let curr = current(); let proc_data = &curr.as_thread().proc_data;
+    let mut fs = proc_data.fs_context.lock();
     let entry = fs.resolve(path)?;
     fs.set_current_dir(entry)?;
     Ok(0)
@@ -115,7 +116,8 @@ pub fn sys_chroot(path: *const c_char) -> AxResult<isize> {
     let path = vm_load_string(path)?;
     debug!("sys_chroot <= path: {path}");
 
-    let mut fs = current().as_thread().proc_data.fs_context.lock();
+    let curr = current(); let proc_data = &curr.as_thread().proc_data;
+    let mut fs = proc_data.fs_context.lock();
     let loc = fs.resolve(path)?;
     if loc.node_type() != NodeType::Directory {
         return Err(AxError::NotADirectory);

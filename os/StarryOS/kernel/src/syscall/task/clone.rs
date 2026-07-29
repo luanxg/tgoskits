@@ -210,9 +210,9 @@ impl CloneArgs {
                 // ensures close_all_fds either observes our strong_count
                 // increment or blocks on write lock until we release.
                 let _guard = old_proc_data.fd_table.read();
-                old_proc_data.fd_table.clone()
+                _guard.clone()
             } else {
-                Arc::new(RwLock::new(old_proc_data.fd_table.read().clone()))
+                Arc::new(RwLock::new(old_proc_data.fd_table.read().read().clone()))
             };
 
             let fs_context = if flags.contains(CloneFlags::FS) {
