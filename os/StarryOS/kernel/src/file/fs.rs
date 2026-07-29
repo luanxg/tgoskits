@@ -7,10 +7,10 @@ use core::{
 };
 
 use ax_errno::{AxError, AxResult};
-use ax_fs_ng::vfs::{FS_CONTEXT, FileBackend, FileFlags, FsContext};
+use ax_fs_ng::vfs::{FileBackend, FileFlags, FsContext};
 use ax_io::{Seek, SeekFrom};
 use ax_sync::Mutex;
-use ax_task::future::{block_on, poll_io};
+use ax_task::{current, future::{block_on, poll_io}};
 use axfs_ng_vfs::{FsIoEvents, FsPollable, Location, Metadata, NodeFlags};
 use axpoll::{IoEvents, Pollable};
 use linux_raw_sys::general::{AT_EMPTY_PATH, AT_FDCWD, AT_SYMLINK_NOFOLLOW, O_APPEND, O_EXCL};
@@ -20,13 +20,14 @@ use super::{FileLike, Kstat, get_file_like};
 use crate::{
     file::{IoDst, IoSrc},
     pseudofs::Device,
+    task::AsThread,
 };
 
 // FusionIO/directFS atomic-write toggle used by MySQL.
 const DFS_IOCTL_ATOMIC_WRITE_SET: u32 = 0x4004_9502;
 
 pub fn with_fs<R>(dirfd: c_int, f: impl FnOnce(&mut FsContext) -> AxResult<R>) -> AxResult<R> {
-    let mut fs = FS_CONTEXT.lock();
+    let mut fs = current().as_thread().proc_data.fs_context.lock();
     if dirfd == AT_FDCWD {
         f(&mut fs)
     } else {

@@ -1,18 +1,19 @@
 use alloc::sync::Arc;
 
 use ax_errno::{AxError, AxResult};
-use ax_fs_ng::vfs::FS_CONTEXT;
 use ax_kspin::SpinNoIrq;
 use ax_runtime::hal::cpu::uspace::UserContext;
+use ax_sync::Mutex;
 use ax_task::{AxTaskExt, current, spawn_task};
 use bitflags::bitflags;
 use linux_raw_sys::general::*;
+use spin::RwLock;
 use starry_process::Pid;
 use starry_signal::Signo;
 use starry_vm::VmMutPtr;
 
 use crate::{
-    file::{FD_TABLE, FileLike, PidFd, close_file_like},
+    file::{FileLike, PidFd, close_file_like},
     mm::copy_from_kernel,
     task::{AsThread, ProcessData, ProcessImage, Thread, add_task_to_table, new_user_task},
 };
@@ -204,6 +205,22 @@ impl CloneArgs {
                 ))
             };
 
+            let fd_table = if flags.contains(CloneFlags::FILES) {
+                // Synchronize with close_all_fds: holding a read lock
+                // ensures close_all_fds either observes our strong_count
+                // increment or blocks on write lock until we release.
+                let _guard = old_proc_data.fd_table.read();
+                old_proc_data.fd_table.clone()
+            } else {
+                Arc::new(RwLock::new(old_proc_data.fd_table.read().clone()))
+            };
+
+            let fs_context = if flags.contains(CloneFlags::FS) {
+                old_proc_data.fs_context.clone()
+            } else {
+                Arc::new(Mutex::new(old_proc_data.fs_context.lock().clone()))
+            };
+
             let proc_data = ProcessData::new(
                 proc,
                 ProcessImage::new(
@@ -216,44 +233,15 @@ impl CloneArgs {
                 exit_signal,
                 curr_thread.tid(),
                 flags.contains(CloneFlags::VM),
+                fs_context,
+                fd_table,
             );
             proc_data.set_umask(old_proc_data.umask());
             proc_data.set_nice(old_proc_data.nice());
             proc_data.set_heap_top(old_proc_data.get_heap_top());
             proc_data.replace_personality(old_proc_data.personality());
-            // 继承父进程的 dumpable 标志（PR_SET_DUMPABLE 状态）。
-            // Linux 行为：fork/clone 创建的子进程会从父进程拷贝 mm->dumpable；
-            // 如果没有这一步，执行 prctl(PR_SET_DUMPABLE, 0) 之后再 fork()，
-            // 子进程的 dumpable 会重置为 SUID_DUMP_USER (1)，
-            // 从而破坏该 prctl 旨在强制实施的安全语义。
-            // 已在 Linux 主机上验证：父进程设为 0 后 fork，子进程的 PR_GET_DUMPABLE 返回 0。
-            // 控制的是进程崩溃后是否允许生成 core dump（核心转储）文件。
             proc_data.set_dumpable(old_proc_data.dumpable());
-            // 禁用透明大页
             proc_data.set_thp_disable(old_proc_data.thp_disable());
-
-            {
-                let mut scope = proc_data.scope.write();
-                if flags.contains(CloneFlags::FILES) {
-                    // Synchronize with close_all_fds: holding a read lock
-                    // ensures close_all_fds either observes our strong_count
-                    // increment or blocks on write lock until we release.
-                    let _guard = FD_TABLE.read();
-                    FD_TABLE.scope_mut(&mut scope).clone_from(&FD_TABLE);
-                } else {
-                    FD_TABLE
-                        .scope_mut(&mut scope)
-                        .write()
-                        .clone_from(&FD_TABLE.read());
-                }
-
-                if flags.contains(CloneFlags::FS) {
-                    FS_CONTEXT.scope_mut(&mut scope).clone_from(&FS_CONTEXT);
-                } else {
-                    let fs_context = FS_CONTEXT.lock().clone();
-                    *FS_CONTEXT.scope_mut(&mut scope).lock() = fs_context;
-                }
-            }
 
             proc_data
         };

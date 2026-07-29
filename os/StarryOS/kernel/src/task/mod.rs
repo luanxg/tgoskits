@@ -19,11 +19,13 @@ use core::{
 };
 
 use ax_errno::AxResult;
+use ax_fs_ng::vfs::{FsContext, ROOT_FS_CONTEXT};
 use ax_runtime::hal::time::TimeValue;
 use ax_sync::{Mutex, spin::SpinNoIrq};
 use ax_task::{TaskExt, TaskInner};
 use axpoll::{IoEvents, PollSet};
 use extern_trait::extern_trait;
+use flatten_objects::FlattenObjects;
 use kernel_elf_parser::AuxEntry;
 use scope_local::{ActiveScope, Scope};
 use spin::RwLock;
@@ -38,7 +40,10 @@ pub use self::{
     stat::*, timer::*, user::*,
 };
 
-use crate::mm::AddrSpace;
+use crate::{
+    file::{AX_FILE_LIMIT, FileDescriptor},
+    mm::AddrSpace,
+};
 
 /// Size of the syscall instruction for the current architecture.
 /// Used by SA_RESTART to back up the program counter.
@@ -575,11 +580,16 @@ pub struct ProcessData {
     pub cmdline: RwLock<Arc<Vec<String>>>,
     /// 通过 /proc/[pid]/auxv 暴露的辅助向量条目。
     pub auxv: RwLock<Vec<AuxEntry>>,
-    /// 虚拟内存地址空间。 
+    /// 虚拟内存地址空间。
     // TODO: 限定作用域
     aspace: SpinNoIrq<Arc<Mutex<AddrSpace>>>,
     /// 资源作用域。
     pub scope: RwLock<Scope>,
+    /// 文件系统上下文（根目录 + 当前工作目录）。
+    pub fs_context: Arc<Mutex<FsContext>>,
+    /// 文件描述符表。外层 RwLock 用于 close_range(UNSHARE) 替换整张表，
+    /// 内层 RwLock 用于常规的增删查操作。
+    pub fd_table: RwLock<Arc<RwLock<FlattenObjects<FileDescriptor, AX_FILE_LIMIT>>>>,
     /// 用户堆顶地址。
     heap_top: AtomicUsize,
 
@@ -679,6 +689,8 @@ impl ProcessData {
         exit_signal: Option<Signo>,
         wait_parent_tid: Pid,
         vm_aspace_shared: bool,
+        fs_context: Arc<Mutex<FsContext>>,
+        fd_table: Arc<RwLock<FlattenObjects<FileDescriptor, AX_FILE_LIMIT>>>,
     ) -> Arc<Self> {
         let this = Arc::new(Self {
             proc,
@@ -687,6 +699,8 @@ impl ProcessData {
             auxv: RwLock::new(image.auxv),
             aspace: SpinNoIrq::new(aspace),
             scope: RwLock::new(Scope::new()),
+            fs_context,
+            fd_table: RwLock::new(fd_table),
             heap_top: AtomicUsize::new(crate::config::USER_HEAP_BASE),
 
             rlim: RwLock::default(),

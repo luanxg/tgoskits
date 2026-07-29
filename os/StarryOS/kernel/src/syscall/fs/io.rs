@@ -5,7 +5,7 @@ use core::{
 };
 
 use ax_errno::{AxError, AxResult, LinuxError};
-use ax_fs_ng::vfs::{FS_CONTEXT, FileBackend, FileFlags, OpenOptions};
+use ax_fs_ng::vfs::{FileBackend, FileFlags, OpenOptions};
 use ax_io::{IoBuf, Read, Seek, SeekFrom};
 use ax_task::current;
 use axfs_ng_vfs::{NodePermission, NodeType};
@@ -208,7 +208,7 @@ pub fn sys_truncate(path: UserConstPtr<c_char>, length: __kernel_off_t) -> AxRes
     }
     let file = OpenOptions::new()
         .write(true)
-        .open(&FS_CONTEXT.lock(), path)?
+        .open(&current().as_thread().proc_data.fs_context.lock(), path)?
         .into_file()?;
     if (length as u64) > u32::MAX as u64 * 4096 {
         return Err(AxError::from(LinuxError::EFBIG));

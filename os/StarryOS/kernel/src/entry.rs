@@ -3,14 +3,13 @@ use alloc::{
     sync::Arc,
 };
 
-use ax_fs_ng::vfs::FS_CONTEXT;
+use ax_fs_ng::vfs::ROOT_FS_CONTEXT;
 use ax_runtime::hal::cpu::uspace::UserContext;
 use ax_sync::Mutex;
 use ax_task::{AxTaskExt, spawn_task};
 use starry_process::{Pid, Process};
 
 use crate::{
-    file::FD_TABLE,
     mm::{copy_from_kernel, load_user_app, new_user_aspace_empty},
     pseudofs::{self, dev::tty::N_TTY},
     task::{ProcessData, ProcessImage, Thread, add_task_to_table, new_user_task, spawn_alarm_task},
@@ -27,7 +26,7 @@ pub fn init(args: &[String], envs: &[String]) {
     //暂时也可以不需要
     ax_alloc::register_page_reclaim_fn(ax_fs_ng::vfs::page_cache_reclaim);
 
-    let loc = FS_CONTEXT
+    let loc = proc.fs_context
         .lock()
         .resolve(&args[0])
         .expect("Failed to resolve executable path");
@@ -65,6 +64,14 @@ pub fn init(args: &[String], envs: &[String]) {
 
     N_TTY.bind_to(&proc).expect("Failed to bind ntty");
 
+    let fs_context = Arc::new(Mutex::new(
+        ROOT_FS_CONTEXT
+            .get()
+            .expect("Root FS context not initialized")
+            .clone(),
+    ));
+    let fd_table = Arc::default();
+
     let proc = ProcessData::new(
         proc,
         ProcessImage::new(path.to_string(), Arc::new(args.to_vec()), auxv),
@@ -73,11 +80,12 @@ pub fn init(args: &[String], envs: &[String]) {
         None,
         pid,
         false,
+        fs_context,
+        fd_table.clone(),
     );
 
     {
-        let mut scope = proc.scope.write();
-        crate::file::add_stdio(&mut FD_TABLE.scope_mut(&mut scope).write())
+        crate::file::add_stdio(&mut fd_table.write())
             .expect("Failed to add stdio");
     }
 
@@ -91,7 +99,7 @@ pub fn init(args: &[String], envs: &[String]) {
     let exit_code = task.join();
     info!("Init process exited with code: {exit_code:?}");
 
-    let cx = FS_CONTEXT.lock();
+    let cx = proc.fs_context.lock();
     cx.root_dir()
         .unmount_all()
         .expect("Failed to unmount all filesystems");

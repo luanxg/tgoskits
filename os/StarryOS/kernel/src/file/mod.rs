@@ -19,7 +19,7 @@ use alloc::{borrow::Cow, sync::Arc};
 use core::{ffi::c_int, time::Duration};
 
 use ax_errno::{AxError, AxResult};
-use ax_fs_ng::vfs::{FS_CONTEXT, FileBackend, FileFlags, OpenOptions};
+use ax_fs_ng::vfs::{FileBackend, FileFlags, OpenOptions};
 use ax_io::prelude::*;
 use ax_task::current;
 use axfs_ng_vfs::DeviceId;
@@ -260,14 +260,21 @@ pub struct FileDescriptor {
     pub cloexec: bool,
 }
 
-scope_local::scope_local! {
-    /// The current file descriptor table.
-    pub static FD_TABLE: Arc<RwLock<FlattenObjects<FileDescriptor, AX_FILE_LIMIT>>> = Arc::default();
+/// Get the current process's fd table, holding the outer read lock to prevent
+/// table replacement by `close_range(UNSHARE)`.
+#[inline]
+fn current_fd_table() -> spin::RwLockReadGuard<'static, Arc<RwLock<FlattenObjects<FileDescriptor, AX_FILE_LIMIT>>>> {
+    // SAFETY: The returned guard prevents the outer RwLock from being written.
+    // The Arc inside stays valid as long as the process exists. The 'static
+    // lifetime is sound because ProcessData outlives any stack frame on the
+    // current thread.
+    let guard = current().as_thread().proc_data.fd_table.read();
+    unsafe { core::mem::transmute(guard) }
 }
 
 /// Get a file-like object by `fd`.
 pub fn get_file_like(fd: c_int) -> AxResult<Arc<dyn FileLike>> {
-    FD_TABLE
+    current_fd_table()
         .read()
         .get(fd as usize)
         .map(|fd| fd.inner.clone())
@@ -289,7 +296,7 @@ pub fn fd_is_path(fd: c_int) -> bool {
 /// Add a file to the file descriptor table.
 pub fn add_file_like(f: Arc<dyn FileLike>, cloexec: bool) -> AxResult<c_int> {
     let max_nofile = current().as_thread().proc_data.rlim.read()[RLIMIT_NOFILE].current;
-    let mut table = FD_TABLE.write();
+    let mut table = current_fd_table().write();
     if table.count() as u64 >= max_nofile {
         return Err(AxError::TooManyOpenFiles);
     }
@@ -299,7 +306,7 @@ pub fn add_file_like(f: Arc<dyn FileLike>, cloexec: bool) -> AxResult<c_int> {
 
 /// Close a file by `fd`.
 pub fn close_file_like(fd: c_int) -> AxResult {
-    let removed = FD_TABLE.write().remove(fd as usize);
+    let removed = current_fd_table().write().remove(fd as usize);
     if let Some(f) = removed {
         debug!("close_file_like <= count: {}", Arc::strong_count(&f.inner));
         release_locks_on_close(f);
@@ -352,18 +359,18 @@ pub fn release_locks_on_close(fd: FileDescriptor) {
 /// pipe reads will never receive EOF.
 pub fn close_all_fds() {
     // Acquire the write lock before checking strong_count. The clone(CLONE_FILES)
-    // path in syscall/task/clone.rs also acquires FD_TABLE.read() before cloning
+    // path in syscall/task/clone.rs also acquires fd_table.read() before cloning
     // the Arc, creating a shared synchronization boundary. This ensures:
     // - If close_all_fds acquires the write lock first, clone blocks on read lock
     //   until we release, so strong_count cannot change during our check.
     // - If clone holds the read lock first, we block on write lock, and by the
     //   time we proceed strong_count already reflects the clone.
-    let mut table = FD_TABLE.write();
+    let mut table = current_fd_table().write();
 
     // CLONE_FILES may share the same fd table across multiple tasks/processes.
     // In that case, an exiting sharer must not clear the whole table, or other
     // live sharers (including the parent) will lose stdout/stderr unexpectedly.
-    if Arc::strong_count(&FD_TABLE) > 1 {
+    if Arc::strong_count(&current_fd_table()) > 1 {
         return;
     }
 
@@ -391,7 +398,7 @@ pub fn close_all_fds() {
     for fd in &removed {
         notify_close_write(fd);
     }
-    // Drop removed descriptors after releasing FD_TABLE lock to avoid
+    // Drop removed descriptors after releasing fd_table lock to avoid
     // lock re-entry or side effects from destructor paths.
     drop(removed);
     for key in lock_keys {
@@ -402,7 +409,7 @@ pub fn close_all_fds() {
 
 pub fn add_stdio(fd_table: &mut FlattenObjects<FileDescriptor, AX_FILE_LIMIT>) -> AxResult<()> {
     assert_eq!(fd_table.count(), 0);
-    let cx = FS_CONTEXT.lock();
+    let cx = current().as_thread().proc_data.fs_context.lock();
     let open = |options: &mut OpenOptions, flags| {
         AxResult::Ok(Arc::new(File::new(
             options.open(&cx, "/dev/console")?.into_file()?,

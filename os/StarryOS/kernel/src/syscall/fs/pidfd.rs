@@ -8,7 +8,7 @@ use starry_signal::{SignalInfo, Signo};
 use starry_vm::VmPtr;
 
 use crate::{
-    file::{FD_TABLE, FileLike, PidFd, add_file_like},
+    file::{FileLike, PidFd, add_file_like, current_fd_table},
     syscall::signal::check_kill_permission,
     task::{
         AsThread, get_process_data, get_task, send_signal_to_process, send_signal_to_process_group,
@@ -100,15 +100,9 @@ pub fn sys_pidfd_getfd(pidfd: i32, target_fd: i32, flags: u32) -> AxResult<isize
         check_kill_permission(proc_data.proc.pid())?;
     }
     let fd_entry = if is_current {
-        // Use the live fd table for the current process. `proc_data.scope` is only
-        // refreshed on clone/dup paths; syscalls like pipe() update ActiveScope only.
-        FD_TABLE.read().get(target_fd as usize).cloned()
+        current_fd_table().read().get(target_fd as usize).cloned()
     } else {
-        FD_TABLE
-            .scope(&proc_data.scope.read())
-            .read()
-            .get(target_fd as usize)
-            .cloned()
+        proc_data.fd_table.read().read().get(target_fd as usize).cloned()
     };
     fd_entry.ok_or(AxError::BadFileDescriptor).and_then(|fd| {
         let fd = add_file_like(fd.inner.clone(), true)?;

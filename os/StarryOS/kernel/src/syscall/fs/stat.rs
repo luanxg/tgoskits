@@ -4,7 +4,7 @@ use core::{
 };
 
 use ax_errno::{AxError, AxResult, LinuxError};
-use ax_fs_ng::vfs::FS_CONTEXT;
+use ax_task::current;
 use ax_task::current;
 use axfs_ng_vfs::{Location, NodePermission};
 use linux_raw_sys::general::{
@@ -233,7 +233,7 @@ pub fn sys_statfs(path: *const c_char, buf: *mut statfs) -> AxResult<isize> {
     debug!("sys_statfs <= path: {path:?}");
 
     buf.vm_write(statfs(
-        &FS_CONTEXT
+        &current().as_thread().proc_data.fs_context
             .lock()
             .resolve(path)?
             .mountpoint()

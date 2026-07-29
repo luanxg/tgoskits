@@ -15,7 +15,7 @@ mod tmp;
 use alloc::{boxed::Box, sync::Arc};
 
 use ax_errno::LinuxResult;
-use ax_fs_ng::vfs::{FS_CONTEXT, FsContext};
+use ax_fs_ng::vfs::{FsContext};
 use ax_lazyinit::LazyInit;
 use axfs_ng_vfs::{DirNodeOps, FileNodeOps, Filesystem, NodePermission, WeakDirEntry};
 pub use tmp::MemoryFs;
@@ -81,7 +81,7 @@ fn mount_at(fs: &FsContext, path: &str, mount_fs: Filesystem) -> LinuxResult<()>
 pub fn mount_all() -> LinuxResult<()> {
     info!("Initialize pseudofs...");
 
-    let fs = FS_CONTEXT.lock();
+    let fs = current().as_thread().proc_data.fs_context.lock();
     mount_at(&fs, "/dev", dev::new_devfs())?;
 
     let (shm_fs, shm_handle) = tmp::MemoryFs::new_with_handle();
