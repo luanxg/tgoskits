@@ -406,9 +406,9 @@ impl AddrSpace {
         Ok(())
     }
 
-    /// To process data in this area with the given function.
+    /// 使用给定函数处理此区域中的数据。
     ///
-    /// Now it supports reading and writing data in the given interval.
+    /// 目前支持在给定区间内读写数据。
     fn process_area_data<F>(&self, start: VirtAddr, size: usize, mut f: F) -> AxResult
     where
         F: FnMut(VirtAddr, usize, usize),
@@ -446,12 +446,12 @@ impl AddrSpace {
         })
     }
 
-    /// To write data to the address space.
+    /// 向地址空间中写入数据。
     ///
-    /// # Arguments
+    /// # 参数
     ///
-    /// * `start_vaddr` - The start virtual address to write.
-    /// * `buf` - The buffer to write to the address space.
+    /// * `start_vaddr` — 要写入的起始虚拟地址。
+    /// * `buf` — 要写入地址空间的数据缓冲区。
     pub fn write(&self, start: VirtAddr, buf: &[u8]) -> AxResult {
         self.process_area_data(start, buf.len(), |dst, offset, write_size| unsafe {
             core::ptr::copy_nonoverlapping(buf.as_ptr().add(offset), dst.as_mut_ptr(), write_size);
