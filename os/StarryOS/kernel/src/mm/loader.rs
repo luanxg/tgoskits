@@ -153,28 +153,31 @@ fn app_stack_region(args: &[String], envs: &[String], auxv: &[AuxEntry], sp: usi
     result
 }
 
-/// Map the elf file to the user address space.
+/// 将 ELF 文件映射到用户地址空间。
 ///
-/// # Arguments
-/// - `uspace`: The address space of the user app.
-/// - `elf`: The elf file.
+/// # 参数
+/// - `uspace`: 用户程序的地址空间。
+/// - `elf`: ELF 文件。
 ///
-/// # Returns
-/// - The entry point of the user app.
+/// # 返回值
+/// - 用户程序的入口点。
 fn map_elf<'a>(
     uspace: &mut AddrSpace,
     base: usize,
     entry: &'a ElfCacheEntry,
 ) -> AxResult<ELFParser<'a>> {
+    //入口地址就是虚拟地址
     let elf_parser = ELFParser::new(entry.borrow_elf(), base).map_err(|_| AxError::InvalidData)?;
+    //相当于一个文件的句柄
     let cache = entry.borrow_cache();
 
-    // PT_TLS init image may extend beyond the last PT_LOAD's file range.
-    // This assumes the PT_TLS file data is contiguous with and immediately
-    // follows the last PT_LOAD segment's file extent, which is the standard
-    // layout produced by GNU ld and LLVM lld.
-    // Compute the maximum file offset needed so the COW backend can serve
-    // TLS init-image page faults for the dynamic linker.
+    // PT_TLS 的初始化镜像可能超出最后一个 PT_LOAD 的文件范围。
+    // 这里假设 PT_TLS 的文件数据紧跟在最后一个 PT_LOAD 段
+    // 的文件末尾之后且与之连续，这是 GNU ld 和 LLVM lld 生成的
+    // 标准布局。
+    // 计算出所需的最大文件偏移，以便 COW 后端能够为动态链接器
+    // 处理 TLS 初始化镜像的缺页请求。
+    // tls_max_offset 是 TLS 初始化镜像在文件中的最远结束偏移。
     let tls_max_offset: u64 = elf_parser
         .headers()
         .ph
@@ -213,8 +216,8 @@ fn map_elf<'a>(
             (ph.mem_size as usize + seg_pad + PAGE_SIZE_4K - 1) & !(PAGE_SIZE_4K - 1);
         let seg_start = VirtAddr::from_usize(vaddr);
 
-        // Note that `offset` might not be aligned to 4K here, and it's
-        // backend's responsibility to properly handle it.
+        // 注意，此处的 `offset` 可能未按 4K 对齐，正确处理它
+        // 是后端的职责。
         let file_end = if i == last_load_idx && tls_max_offset > ph.offset + ph.file_size {
             tls_max_offset
         } else {
@@ -237,258 +240,18 @@ fn map_elf<'a>(
         )?;
     }
 
-    // Apply relocations for static-pie binaries
-    // On non-riscv64 architectures, apply_relocations() is a no-op stub.
+    // 为 static-pie 二进制文件应用重定位
+    // 在非 riscv64 架构上，apply_relocations() 是一个空操作桩函数。
+    // 共享库的解析，可以先不管
     if elf_parser.headers().header.pt1.class() == xmas_elf::header::Class::SixtyFour {
         let is_pie = elf_parser.headers().header.pt2.type_().as_type()
             == xmas_elf::header::Type::SharedObject;
         if is_pie {
-            #[cfg(target_arch = "riscv64")]
-            {
-                // Populate PT_LOAD segments so relocation writes can access pages
-                for seg in elf_parser
-                    .headers()
-                    .ph
-                    .iter()
-                    .filter(|p| p.get_type() == Ok(xmas_elf::program::Type::Load))
-                {
-                    let seg_start =
-                        VirtAddr::from_usize(base + seg.virtual_addr as usize).align_down_4k();
-                    let seg_pad = (base + seg.virtual_addr as usize).align_offset_4k();
-                    let seg_size =
-                        (seg.mem_size as usize + seg_pad + PAGE_SIZE_4K - 1) & !(PAGE_SIZE_4K - 1);
-                    uspace.populate_area(seg_start, seg_size, mapping_flags(seg.flags))?;
-                }
-            }
             apply_relocations(uspace, base, entry.borrow_cache(), &elf_parser.headers().ph)?;
         }
     }
 
     Ok(elf_parser)
-}
-
-/// Convert a virtual address to a file offset using PT_LOAD segments.
-///
-/// This function searches through the program headers to find which PT_LOAD
-/// segment contains the given virtual address, then calculates the
-/// corresponding file offset.
-///
-/// Returns None if the address is not within any PT_LOAD segment.
-#[cfg(target_arch = "riscv64")]
-fn vaddr_to_file_offset(vaddr: u64, ph: &[xmas_elf::program::ProgramHeader64]) -> Option<usize> {
-    let vaddr = vaddr as usize;
-    for seg in ph {
-        if seg.get_type() != Ok(xmas_elf::program::Type::Load) {
-            continue;
-        }
-        let seg_vaddr = seg.virtual_addr as usize;
-        let seg_filesz = seg.file_size as usize;
-        if vaddr >= seg_vaddr && vaddr < seg_vaddr + seg_filesz {
-            let offset_in_segment = vaddr - seg_vaddr;
-            return Some(seg.offset as usize + offset_in_segment);
-        }
-    }
-    None
-}
-
-/// Apply relocations for static-pie binaries.
-///
-/// This processes .rela.dyn and .rela.plt sections to apply
-/// R_RISCV_RELATIVE and R_RISCV_JUMP_SLOT relocations.
-#[cfg(target_arch = "riscv64")]
-fn apply_relocations(
-    uspace: &mut AddrSpace,
-    base: usize,
-    cache: &CachedFile,
-    ph: &[xmas_elf::program::ProgramHeader64],
-) -> AxResult {
-    // Find PT_DYNAMIC segment
-    let dynamic_ph = ph
-        .iter()
-        .find(|p| p.get_type() == Ok(xmas_elf::program::Type::Dynamic));
-
-    let dynamic_ph = match dynamic_ph {
-        Some(ph) => ph,
-        None => return Ok(()), // No dynamic section, nothing to do
-    };
-
-    // Read dynamic entries from file
-    let dyn_offset = dynamic_ph.offset as usize;
-    let dyn_size = dynamic_ph.file_size as usize;
-
-    if dyn_offset + dyn_size > (cache.location().len().unwrap_or(0) as usize) {
-        debug!("Dynamic section extends beyond file");
-        return Err(AxError::InvalidData);
-    }
-
-    let mut dyn_data = vec![0u8; dyn_size];
-    cache.read_at(&mut dyn_data, dyn_offset as u64)?;
-    let entry_size = 16; // sizeof(Dynamic<u64>) = 16 bytes
-    let num_entries = dyn_size / entry_size;
-
-    // Parse dynamic entries using byte-by-byte reading
-    let mut rela_addr: u64 = 0;
-    let mut rela_size: u64 = 0;
-    let mut jmprel_addr: u64 = 0;
-    let mut jmprel_size: u64 = 0;
-    let mut symtab_addr: u64 = 0;
-    let mut strtab_addr: u64 = 0;
-
-    for i in 0..num_entries {
-        let offset = i * entry_size;
-        let entry_data = &dyn_data[offset..offset + entry_size];
-
-        // Dynamic entry: tag (8 bytes) + value (8 bytes)
-        let tag = u64::from_le_bytes(entry_data[0..8].try_into().unwrap());
-        let value = u64::from_le_bytes(entry_data[8..16].try_into().unwrap());
-
-        match tag {
-            7 => rela_addr = value,    // DT_RELA
-            8 => rela_size = value,    // DT_RELASZ
-            23 => jmprel_addr = value, // DT_JMPREL
-            2 => jmprel_size = value,  // DT_PLTRELSZ
-            6 => symtab_addr = value,  // DT_SYMTAB
-            5 => strtab_addr = value,  // DT_STRTAB
-            0 => break,                // DT_NULL
-            _ => {}
-        }
-    }
-
-    // Process .rela.dyn (R_RISCV_RELATIVE)
-    if rela_addr != 0 && rela_size != 0 {
-        let rela_offset = vaddr_to_file_offset(rela_addr, ph).ok_or(AxError::InvalidData)?;
-        let rela_entry_size = 24; // sizeof(Rela<u64>) = 24 bytes
-        let rela_count = rela_size as usize / rela_entry_size;
-        let mut copy_count: usize = 0;
-
-        debug!("Processing {} RELATIVE relocations", rela_count);
-
-        for i in 0..rela_count {
-            let entry_offset = rela_offset + i * rela_entry_size;
-            if entry_offset + rela_entry_size > (cache.location().len().unwrap_or(0) as usize) {
-                break;
-            }
-
-            let mut entry_data = vec![0u8; rela_entry_size];
-            cache.read_at(&mut entry_data, entry_offset as u64)?;
-
-            // Rela entry: offset (8 bytes) + info (8 bytes) + addend (8 bytes)
-            let offset = u64::from_le_bytes(entry_data[0..8].try_into().unwrap()) as usize;
-            let info = u64::from_le_bytes(entry_data[8..16].try_into().unwrap());
-            let addend = i64::from_le_bytes(entry_data[16..24].try_into().unwrap());
-
-            let reloc_type = (info & 0xffffffff) as u32;
-
-            match reloc_type {
-                R_RISCV_RELATIVE => {
-                    // *(base + offset) = base + addend
-                    let target = base + offset;
-                    let value = (base as i64 + addend) as u64;
-                    uspace.write(VirtAddr::from_usize(target), &value.to_le_bytes())?;
-                    debug!("RELATIVE: [{:#x}] = {:#x}", target, value);
-                }
-                R_RISCV_64 => {
-                    // S + A (symbol value + addend)
-                    let sym_idx = (info >> 32) as usize;
-                    if symtab_addr == 0 || strtab_addr == 0 {
-                        debug!("Missing symtab/strtab for R_RISCV_64");
-                        continue;
-                    }
-
-                    let sym_file_offset =
-                        vaddr_to_file_offset(symtab_addr, ph).ok_or(AxError::InvalidData)?;
-                    let sym_entry_offset = sym_file_offset + sym_idx * 24;
-                    let file_len = cache.location().len().unwrap_or(0) as usize;
-                    if sym_entry_offset + 24 > file_len {
-                        continue;
-                    }
-                    let mut sym_data = vec![0u8; 24];
-                    cache.read_at(&mut sym_data, sym_entry_offset as u64)?;
-                    let st_value = u64::from_le_bytes(sym_data[8..16].try_into().unwrap());
-                    if st_value == 0 {
-                        continue;
-                    }
-                    let target = base + offset;
-                    let value = (base as i64 + st_value as i64 + addend) as u64;
-                    uspace.write(VirtAddr::from_usize(target), &value.to_le_bytes())?;
-                }
-                R_RISCV_COPY => {
-                    copy_count += 1;
-                }
-                _ => {
-                    debug!("[apply_relocations] unknown .rela.dyn type={}", reloc_type);
-                }
-            }
-        }
-        if copy_count > 0 {
-            debug!(
-                "[apply_relocations] skipped {} R_RISCV_COPY relocations",
-                copy_count
-            );
-        }
-    }
-
-    // Process .rela.plt (R_RISCV_JUMP_SLOT)
-    if jmprel_addr != 0 && jmprel_size != 0 {
-        let jmprel_offset = vaddr_to_file_offset(jmprel_addr, ph).ok_or(AxError::InvalidData)?;
-        let rela_entry_size = 24; // sizeof(Rela<u64>) = 24 bytes
-        let jmprel_count = jmprel_size as usize / rela_entry_size;
-
-        debug!("Processing {} JUMP_SLOT relocations", jmprel_count);
-
-        for i in 0..jmprel_count {
-            let entry_offset = jmprel_offset + i * rela_entry_size;
-            if entry_offset + rela_entry_size > (cache.location().len().unwrap_or(0) as usize) {
-                break;
-            }
-
-            let mut entry_data = vec![0u8; rela_entry_size];
-            cache.read_at(&mut entry_data, entry_offset as u64)?;
-
-            // Rela entry: offset (8 bytes) + info (8 bytes) + addend (8 bytes)
-            let offset = u64::from_le_bytes(entry_data[0..8].try_into().unwrap()) as usize;
-            let info = u64::from_le_bytes(entry_data[8..16].try_into().unwrap());
-            let _addend = i64::from_le_bytes(entry_data[16..24].try_into().unwrap());
-
-            let reloc_type = (info & 0xffffffff) as u32;
-            let sym_idx = (info >> 32) as usize;
-
-            match reloc_type {
-                R_RISCV_JUMP_SLOT => {
-                    // For static-pie, symbols are in the binary itself
-                    // We need to look up the symbol in .dynsym
-                    if symtab_addr == 0 || strtab_addr == 0 {
-                        debug!("Missing symtab/strtab for JUMP_SLOT");
-                        continue;
-                    }
-
-                    // Read symbol from .dynsym
-                    let sym_file_offset =
-                        vaddr_to_file_offset(symtab_addr, ph).ok_or(AxError::InvalidData)?;
-                    let sym_entry_offset = sym_file_offset + sym_idx * 24;
-                    let file_len = cache.location().len().unwrap_or(0) as usize;
-                    if sym_entry_offset + 24 > file_len {
-                        continue;
-                    }
-                    let mut sym_data = vec![0u8; 24];
-                    cache.read_at(&mut sym_data, sym_entry_offset as u64)?;
-                    let st_value = u64::from_le_bytes(sym_data[8..16].try_into().unwrap());
-
-                    if st_value == 0 {
-                        continue;
-                    }
-                    let target = base + offset;
-                    let value = base as u64 + st_value;
-                    uspace.write(VirtAddr::from_usize(target), &value.to_le_bytes())?;
-                }
-                _ => {
-                    debug!("Unsupported relocation type: {}", reloc_type);
-                }
-            }
-        }
-    }
-
-    Ok(())
 }
 
 /// Stub for non-riscv64 architectures
@@ -520,9 +283,13 @@ impl ElfCacheEntry {
     fn load(loc: Location) -> AxResult<Result<Self, Vec<u8>>> {
         let cache = CachedFile::get_or_create(loc)?;
 
+        //从文件的偏移量 0 开始，最多读取 4096 字节（4KB）到 data 缓冲区中。
         let mut data = vec![0; 4096];
         let read = cache.read_at(&mut data[..], 0)?;
+
+        //把 data 的长度缩减到实际读取的字节数。
         data.truncate(read);
+
         match ElfCacheEntry::try_new_or_recover::<AxError>(cache.clone(), data, |data| {
             let builder = ELFHeadersBuilder::new(data).map_err(map_elf_error)?;
             let range = builder.ph_range();
@@ -605,9 +372,12 @@ impl ElfLoader {
         }
 
         uspace.clear();
+        //用户地址空间映射一个信号返回跳板
         map_trampoline(uspace)?;
 
         let entry = self.0.front().unwrap();
+
+        //动态链接的处理
         let ldso = if let Some(header) = entry
             .borrow_elf()
             .ph
@@ -629,6 +399,7 @@ impl ElfLoader {
             None
         };
 
+        //动态链接的处理
         let (elf, ldso) = if let Some(ldso) = ldso {
             let loc = fs_ctx.lock().resolve(ldso)?;
             if !self.0.touch(|e| e.borrow_cache().location().ptr_eq(&loc)) {
@@ -644,7 +415,10 @@ impl ElfLoader {
             (entry, None)
         };
 
+        //映射用户态地址空间
         let elf = map_elf(uspace, crate::config::USER_SPACE_BASE, elf)?;
+
+        //动态链接的处理
         let ldso = if ldso.is_some() {
             let max_end = uspace
                 .areas()
@@ -663,6 +437,7 @@ impl ElfLoader {
                 .map_or_else(|| elf.entry(), |ldso| ldso.entry()),
         );
         let has_ldso = ldso.is_some();
+        //进程辅助变量auxv的处理
         let mut auxv = elf
             .aux_vector(PAGE_SIZE_4K, ldso.map(|elf| elf.base()))
             .collect::<Vec<_>>();
@@ -689,34 +464,33 @@ impl ElfLoader {
 
 static ELF_LOADER: Mutex<ElfLoader> = Mutex::new(ElfLoader::new());
 
-/// Clear the ELF cache.
+/// 清空 ELF 缓存。
 ///
-/// Useful for removing noises during memory leak detect.
+/// 用于在内存泄漏检测时排除干扰。
 #[cfg(feature = "memtrack")]
 pub fn clear_elf_cache() {
     ELF_LOADER.lock().0.clear();
 }
 
-/// Load the user app to the user address space.
+/// 将用户程序加载到用户地址空间。
 ///
-/// The executable is identified by an already-resolved [`Location`] — the
-/// caller resolves and opens it once (mirroring Linux's `do_open_execat`,
-/// which honors `AT_SYMLINK_NOFOLLOW` at that single lookup), and this never
-/// re-resolves the main executable from its pathname. Interpreters reached
-/// through a `.sh` redirect or a `#!` shebang are resolved here by path, which
-/// is Linux's `open_exec(interp)` and legitimately follows symlinks.
+/// 可执行文件由一个已解析的 [`Location`] 标识 —— 调用者负责一次性解析并打开它
+/// （对应 Linux 的 `do_open_execat`，在单次查找中遵循 `AT_SYMLINK_NOFOLLOW`），
+/// 本函数绝不会根据路径名重新解析主可执行文件。通过 `.sh` 重定向或 `#!` shebang
+/// 触达的解释器由本函数按路径解析，这对应 Linux 的 `open_exec(interp)`，合法地
+/// 跟随符号链接。
 ///
-/// # Arguments
-/// - `uspace`: The address space of the user app.
-/// - `loc`: The resolved executable to load.
-/// - `path`: The pathname the executable was invoked as, used for the `.sh`
-///   redirect and for the script name an interpreter receives in `argv`.
-/// - `args`: The arguments of the user app.
-/// - `envs`: The environment variables of the user app.
+/// # 参数
+/// - `uspace`：用户程序的地址空间。
+/// - `loc`：要加载的已解析可执行文件。
+/// - `path`：调用该可执行文件时使用的路径名，用于 `.sh` 重定向以及解释器在
+///   `argv` 中接收到的脚本名。
+/// - `args`：用户程序的参数。
+/// - `envs`：用户程序的环境变量。
 ///
-/// # Returns
-/// - The entry point of the user app.
-/// - The stack pointer of the user app.
+/// # 返回值
+/// - 用户程序的入口点。
+/// - 用户程序的栈指针。
 pub fn load_user_app(
     uspace: &mut AddrSpace,
     loc: Location,
@@ -725,9 +499,9 @@ pub fn load_user_app(
     envs: &[String],
     fs_ctx: &Mutex<FsContext>,
 ) -> AxResult<(VirtAddr, VirtAddr, Vec<AuxEntry>)> {
-    // `/proc/self/exe` is available in procfs; busybox can `readlink` it
-    // to re-exec itself as a shell on ENOEXEC, provided the busybox build
-    // includes that fallback (Alpine's prebuilt binary may not).
+    // `/proc/self/exe` 在 procfs 中可用；busybox 可以通过 `readlink` 读取它，
+    // 以便在 ENOEXEC 时重新以 shell 身份执行自身，前提是 busybox 编译时包含了
+    // 该回退逻辑（Alpine 的预编译二进制可能未包含）。
     if path.ends_with(".sh") {
         let new_args: Vec<String> = iter::once("/bin/sh".to_owned())
             .chain(args.iter().cloned())
@@ -738,6 +512,7 @@ pub fn load_user_app(
 
     let (entry, auxv) = match { ELF_LOADER.lock().load(uspace, loc, fs_ctx)? } {
         Ok((entry, auxv)) => (entry, auxv),
+        //解析以#!开头的文件
         Err(data) => {
             if data.starts_with(b"#!") {
                 let head = &data[2..data.len().min(256)];
@@ -751,8 +526,8 @@ pub fn load_user_app(
                     .chain(iter::once(path.to_owned()))
                     .chain(args.iter().skip(1).cloned())
                     .collect();
-                // Open the interpreter by path (Linux's `open_exec` on the
-                // shebang interpreter) and load it as the new executable.
+                // 按路径打开解释器（对应 Linux 中对 shebang 解释器的
+                // `open_exec` 调用），并将其作为新的可执行文件加载。
                 let interp = fs_ctx.lock().resolve(&new_args[0])?;
                 return load_user_app(uspace, interp, &new_args[0], &new_args, envs, fs_ctx);
             }
@@ -760,11 +535,13 @@ pub fn load_user_app(
         }
     };
 
+    //USER_STACK_TOP = 0x0400_0000_0000 USER_STACK_SIZE = 0x80_0000 = 8MB
     let ustack_top = VirtAddr::from_usize(crate::config::USER_STACK_TOP);
     let ustack_size = crate::config::USER_STACK_SIZE;
     let ustack_start = ustack_top - ustack_size;
     debug!("Mapping user stack: {ustack_start:#x?} -> {ustack_top:#x?}");
 
+    //为用户进程分配并映射栈空间。
     uspace.map(
         ustack_start,
         ustack_size,
@@ -773,14 +550,46 @@ pub fn load_user_app(
         Backend::new_alloc(ustack_start, PageSize::Size4K, "[stack]"),
     )?;
 
+    //从栈顶（ustack_top，高地址）到低地址的布局：
+    //sp (0x0400_0000_0000)
+    //      ┌──────────────┐
+    //      │    argc      │  ← pu***s，最后一个 push
+    //      ├──────────────┤
+    //      │   argv[0]    │
+    //      │   argv[1]    │  ← argv 指针数组
+    //      │     ...      │
+    //      │    NULL      │
+    //      ├──────────────┤
+    //      │   envp[0]    │
+    //      │   envp[1]    │  ← envp 指针数组
+    //      │     ...      │
+    //      │    NULL      │
+    //      ├──────────────┤
+    //      │  auxv[0..n]  │  ← 辅助向量数组（AT_PHDR, AT_ENTRY…）
+    //      ├──────────────┤
+    //      │  AT_RANDOM   │  → 指向下方随机字节的指针
+    //      │  AT_EXECFN   │  → 指向 argv[0] 字符串的指针
+    //      │   AT_NULL    │  ← 结束标记（musl 依赖它来停止解析）
+    //      ├──────────────┤
+    //      │ 对齐填充      │  ← sp 保持 16 字节对齐
+    //      ├──────────────┤
+    //      │ arg 字符串    │  ← "/bin/ls\0", "-l\0"...
+    //      ├──────────────┤
+    //      │ env 字符串    │  ← "PATH=/usr/bin\0"...
+    //      ├──────────────┤
+    //      │ 16字节随机值  │  ← AT_RANDOM 指向这里
+    //      └──────────────┘
+    //ustack_start (0x03FF_FF80_0000)
     let stack_data = app_stack_region(args, envs, &auxv, ustack_top.into());
     let user_sp = ustack_top - stack_data.len();
     let user_sp_aligned = user_sp.align_down_4k();
+    //建立PTE映射
     uspace.populate_area(
         user_sp_aligned,
         (ustack_top - user_sp_aligned).align_up_4k(),
         MappingFlags::READ | MappingFlags::WRITE,
     )?;
+    //新进程启动时，sp 寄存器指向 user_sp，_start 执行的第一条指令就能正确读到 argc、argv、envp、auxv。
     uspace.write(user_sp, stack_data.as_slice())?;
 
     let heap_start = VirtAddr::from_usize(crate::config::USER_HEAP_BASE);
